@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}Register{% endblock %}
+{% block content %}
+<h1>Register</h1>
+<form method="post" action="{{ url_for('auth.register') }}">
+  {{ form.hidden_tag() }}
+  <p>{{ form.username.label }} {{ form.username() }}</p>
+  <p class="hint">
+    {{ limits.username_min }} to {{ limits.username_max }} characters: letters
+    a-z, digits, ".", "_" and "-"; it must start and end with a letter or
+    a digit.
+  </p>
+  {% for message in form.username.errors %}
+  <p class="error" role="alert">{{ message }}</p>
+  {% endfor %}
+  <p>{{ form.password.label }} {{ form.password() }}</p>
+  <p class="hint">
+    {{ limits.password_min }} to {{ limits.password_max }} characters. A long
+    sentence works well.
+  </p>
+  {% for message in form.password.errors %}
+  <p class="error" role="alert">{{ message }}</p>
+  {% endfor %}
+  <p>{{ form.confirm.label }} {{ form.confirm() }}</p>
+  {% for message in form.confirm.errors %}
+  <p class="error" role="alert">{{ message }}</p>
+  {% endfor %}
+  <p><button type="submit">Create account</button></p>
+</form>
+<p>Already registered? <a href="{{ url_for('auth.login') }}">Log in</a></p>
+{% endblock %}

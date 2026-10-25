@@ -74,4 +74,14 @@ def create_app(config_object: Optional[object] = None) -> Flask:
     # file) keeps ``import app`` free of side effects.
     from app import models  # noqa: F401
 
+    # Pages. Imported here for the same reason as the models.
+    from app.auth.routes import auth_bp
+    from app.placeholder import main_bp
+
+    app.register_blueprint(auth_bp)
+    app.register_blueprint(main_bp)
+    login_manager.login_view = "auth.login"
+    login_manager.login_message = "Please log in to continue."
+    login_manager.login_message_category = "info"
+
     return app

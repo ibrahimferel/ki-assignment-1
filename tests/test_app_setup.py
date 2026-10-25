@@ -26,17 +26,13 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
 @pytest.fixture()
-def web(tmp_path):
-    """An app with a few test-only routes and two saved users.
+def web(web):
+    """The conftest ``web`` app plus a few test-only routes and two users.
 
-    Unlike the ``app`` fixture in conftest.py, no application context stays
-    open around the test. That matters here: with an outer context, ``g`` is
-    shared by all requests, so Flask-Login would remember the user of the
-    first request and these tests could not see a session being dropped.
+    Same name on purpose: it overrides the conftest fixture in this module
+    and builds on it.
     """
-    config = TestingConfig()
-    config.STORAGE_DIR = tmp_path / "storage"
-    app = create_app(config)
+    app = web
 
     @app.get("/token")
     def token():
@@ -74,15 +70,10 @@ def web(tmp_path):
         return "anon"
 
     with app.app_context():
-        db.create_all()
         for name in ("alice", "bobby"):
             db.session.add(User(username=name, password_hash="x" * 20))
         db.session.commit()
-    yield app
-    with app.app_context():
-        db.session.remove()
-        db.drop_all()
-        db.engine.dispose()
+    return app
 
 
 @pytest.fixture()

@@ -745,8 +745,9 @@ def test_every_test_starts_with_empty_tables(app):
 
 
 def test_the_client_fixture_talks_to_the_app(client):
-    # No routes exist yet; a 404 proves the request reached the app.
-    assert client.get("/").status_code == 404
+    # A 404 for an address that no route serves proves the request reached
+    # the app.
+    assert client.get("/no-such-page").status_code == 404
 
 
 # ---------------------------------------------------- Flask-Login interface

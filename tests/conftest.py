@@ -38,6 +38,33 @@ def client(app):
 
 
 @pytest.fixture()
+def web(tmp_path):
+    """A fresh app with created tables and NO open application context.
+
+    Use it for tests that send several requests in a row (login, logout,
+    CSRF). The ``app`` fixture keeps one application context open for the
+    whole test, so ``g`` would be shared by all requests and Flask-Login
+    would remember the user of the first one.
+    """
+    config = TestingConfig()
+    config.STORAGE_DIR = tmp_path / "storage"
+    flask_app = create_app(config)
+    with flask_app.app_context():
+        db.create_all()
+    yield flask_app
+    with flask_app.app_context():
+        db.session.remove()
+        db.drop_all()
+        db.engine.dispose()
+
+
+@pytest.fixture()
+def web_client(web):
+    """A test client for ``web``."""
+    return web.test_client()
+
+
+@pytest.fixture()
 def make_user(app):
     """Return a function that creates and saves a user."""
 
