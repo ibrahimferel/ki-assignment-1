@@ -151,6 +151,9 @@ class Config:
         self.SQLALCHEMY_DATABASE_URI = _read_database_uri(environ)
         self.MAX_CONTENT_LENGTH = _read_max_upload_mb(environ) * 1024 * 1024
         self.STORAGE_DIR = _read_storage_dir(environ)
+        # Keep bound parameters (password hashes, wrapped keys) out of
+        # database error messages and logs.
+        self.SQLALCHEMY_ENGINE_OPTIONS = {"hide_parameters": True}
 
 
 class TestingConfig:
@@ -175,3 +178,4 @@ class TestingConfig:
         self.MASTER_KEY = secrets.token_bytes(MASTER_KEY_BYTES)
         unique_name = f"cryptoapp-test-{secrets.token_hex(8)}"
         self.STORAGE_DIR = Path(tempfile.gettempdir()) / unique_name
+        self.SQLALCHEMY_ENGINE_OPTIONS = {"hide_parameters": True}
