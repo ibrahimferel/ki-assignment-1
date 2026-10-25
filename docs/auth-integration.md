@@ -106,6 +106,58 @@ fetch("/files/", {
 Token berlaku 3600 detik. Berhenti sesudah logout, jadi ambil token baru dari
 halaman setelah login ulang.
 
+## Unggah berkas
+
+Form HTML butuh `enctype="multipart/form-data"`, dan token CSRF dikirim
+sebagai field tersembunyi:
+
+```html
+<form method="post" action="/files/upload" enctype="multipart/form-data">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <input type="file" name="file" required>
+  <button type="submit">Unggah</button>
+</form>
+```
+
+Untuk `fetch` dengan `FormData`, token dikirim di header `X-CSRFToken`, dan
+`Content-Type` **tidak diisi manual**: browser menambahkannya sendiri beserta
+`boundary`. Bila Anda mengisinya, `boundary` hilang dan unggahan gagal.
+
+```javascript
+const token = document.querySelector('meta[name="csrf-token"]').content;
+const data = new FormData();
+data.append("file", fileInput.files[0]);
+fetch("/files/upload", {
+  method: "POST",
+  headers: { "X-CSRFToken": token },
+  body: data,
+});
+```
+
+Sisi server (contoh ini hanya menghitung ukuran; enkripsi dan penyimpanan
+adalah tugas modul masing-masing). Tambahkan ke blueprint di atas:
+
+```python
+@files_bp.post("/upload")
+@login_required
+def upload_file():
+    uploaded = request.files.get("file")
+    if uploaded is None or not uploaded.filename:
+        return jsonify(error="Pilih satu berkas."), 400
+    return jsonify(size=len(uploaded.read())), 201
+```
+
+Hal yang perlu diketahui:
+
+- **Batas ukuran:** `MAX_UPLOAD_MB` di `.env` (bawaan 50, artinya
+  50 x 1024 x 1024 byte per permintaan). Permintaan yang lebih besar dijawab
+  413. Batas ini berlaku untuk seluruh isi permintaan, bukan per berkas.
+- **Penyimpanan:** setiap berkas disimpan sebagai tiga salinan sandi (AES,
+  DES, RC4), jadi kebutuhan penyimpanan sekitar tiga kali ukuran berkas.
+- **Log:** jangan mencatat password, kunci (`SECRET_KEY`, `MASTER_KEY`, kunci
+  per berkas), token sesi atau cookie, token CSRF, maupun isi berkas.
+  Catatan bawaan server hanya memuat metode, alamat dan status permintaan.
+
 ## Berkas di disk
 
 Path hanya dibuat dari `storage_name` di database, sesudah
