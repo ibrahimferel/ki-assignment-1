@@ -14,6 +14,8 @@ Both are meant to be *instantiated*, e.g. ``app.config.from_object(Config())``.
 
 import os
 import secrets
+import string
+import tempfile
 from pathlib import Path
 from typing import Mapping, Optional
 
@@ -23,7 +25,12 @@ from dotenv import load_dotenv
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 MIN_SECRET_KEY_LENGTH = 32
-DEFAULT_MAX_UPLOAD_MB = 100
+MASTER_KEY_BYTES = 32  # AES-256 key size; written as 64 hex characters.
+DEFAULT_MAX_UPLOAD_MB = 50  # One upload is stored as 3 ciphertext copies.
+
+# Where ciphertext files are kept. This matches Flask's instance/ folder for
+# an app created in the ``app`` package; a test compares the two.
+DEFAULT_STORAGE_DIR = BASE_DIR / "instance" / "storage"
 
 # A relative SQLite path is placed inside the Flask instance/ folder by
 # Flask-SQLAlchemy, which also creates that folder if it does not exist.
@@ -48,6 +55,33 @@ def _read_secret_key(env: Mapping[str, str]) -> str:
             '    python -c "import secrets; print(secrets.token_hex(32))"'
         )
     return value
+
+
+def _read_master_key(env: Mapping[str, str], secret_key: str) -> bytes:
+    """Return the master key as raw bytes, or raise ``ConfigError``.
+
+    The key wraps the per-file keys stored in the database. It must be a
+    different secret from SECRET_KEY, so that leaking one does not leak both.
+    """
+    help_text = (
+        "Generate a separate value (not the one used for SECRET_KEY) and "
+        "set it in .env:\n"
+        '    python -c "import secrets; print(secrets.token_hex(32))"'
+    )
+    value = env.get("MASTER_KEY", "").strip()
+    if value == "":
+        raise ConfigError("MASTER_KEY is missing.\n" + help_text)
+    # Checked by hand: bytes.fromhex() would also accept inner whitespace.
+    if len(value) != MASTER_KEY_BYTES * 2 or any(
+        char not in string.hexdigits for char in value
+    ):
+        raise ConfigError(
+            f"MASTER_KEY must be exactly {MASTER_KEY_BYTES * 2} hexadecimal "
+            f"characters ({MASTER_KEY_BYTES} bytes).\n" + help_text
+        )
+    if value.lower() == secret_key.lower():
+        raise ConfigError("MASTER_KEY must be different from SECRET_KEY.")
+    return bytes.fromhex(value)
 
 
 def _read_bool(env: Mapping[str, str], name: str, default: bool) -> bool:
@@ -83,6 +117,21 @@ def _read_database_uri(env: Mapping[str, str]) -> str:
     return env.get("DATABASE_URL", "").strip() or DEFAULT_DATABASE_URI
 
 
+def _read_storage_dir(env: Mapping[str, str]) -> Path:
+    """Return the ciphertext folder. Nothing is created on disk here."""
+    raw = env.get("STORAGE_DIR", "").strip()
+    if raw == "":
+        return DEFAULT_STORAGE_DIR
+    path = Path(raw)
+    if not path.is_absolute():
+        # Relative to the project folder, never to the current directory.
+        path = BASE_DIR / path
+    path = Path(os.path.normpath(path))
+    if path.exists() and not path.is_dir():
+        raise ConfigError("STORAGE_DIR points to a file, not a folder.")
+    return path
+
+
 class Config:
     """Settings for normal runs, read from the environment.
 
@@ -97,17 +146,20 @@ class Config:
             environ = os.environ
 
         self.SECRET_KEY = _read_secret_key(environ)
+        self.MASTER_KEY = _read_master_key(environ, self.SECRET_KEY)
         self.DEBUG = _read_bool(environ, "FLASK_DEBUG", default=False)
         self.SQLALCHEMY_DATABASE_URI = _read_database_uri(environ)
         self.MAX_CONTENT_LENGTH = _read_max_upload_mb(environ) * 1024 * 1024
+        self.STORAGE_DIR = _read_storage_dir(environ)
 
 
 class TestingConfig:
     """Settings for automated tests.
 
     Never reads ``.env`` or ``DATABASE_URL``, so a test run can not touch the
-    real database. The database lives in memory and the secret key is random
-    for every instance.
+    real database. The database lives in memory and both keys are random for
+    every instance. STORAGE_DIR is a unique path in the system temp folder that
+    is *not* created; the test fixture should replace it with ``tmp_path``.
     """
 
     # Tell pytest this is not a test class, despite the "Test" name prefix.
@@ -120,3 +172,6 @@ class TestingConfig:
 
     def __init__(self) -> None:
         self.SECRET_KEY = secrets.token_hex(32)
+        self.MASTER_KEY = secrets.token_bytes(MASTER_KEY_BYTES)
+        unique_name = f"cryptoapp-test-{secrets.token_hex(8)}"
+        self.STORAGE_DIR = Path(tempfile.gettempdir()) / unique_name
