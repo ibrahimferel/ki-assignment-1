@@ -177,6 +177,80 @@ pemilik, catat semua `storage_name`, hapus baris dan `commit`, baru hapus
 berkas (jika gagal, catat dan lanjutkan). Berkas yang hilang saat diunduh
 (`FileNotFoundError`) dijawab 404.
 
+## Header keamanan dan CSP
+
+Setiap jawaban (halaman, pengalihan, error 4xx/5xx, dan berkas statis) diberi
+header ini oleh `app/security_headers.py`. Rute tidak perlu menambahkannya,
+dan tidak bisa melemahkannya:
+
+| Header | Nilai |
+| --- | --- |
+| `X-Content-Type-Options` | `nosniff` |
+| `X-Frame-Options` | `DENY` |
+| `Referrer-Policy` | `no-referrer` |
+| `Permissions-Policy` | `camera=(), microphone=(), geolocation=(), payment=(), usb=()` |
+| `Cross-Origin-Opener-Policy` | `same-origin` |
+| `Cross-Origin-Resource-Policy` | `same-origin` |
+| `Content-Security-Policy` | `default-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; object-src 'none'` |
+| `Cache-Control` | `no-store` (dipaksa; bukan untuk `/static/`) |
+| `Strict-Transport-Security` | `max-age=31536000`, hanya bila `SESSION_COOKIE_SECURE` aktif |
+
+Hanya CSP yang **bawaan**: rute boleh menggantinya dengan nilai yang lebih
+ketat (misalnya menambah `sandbox`), tetapi tidak boleh melonggarkannya. Kode
+tidak bisa membedakan keduanya, jadi larangan ini hanya ada di dokumen ini.
+
+**Cache.** Semua jawaban selain `/static/` selalu `Cache-Control: no-store`.
+Rute tidak bisa memilih cache sendiri: `private, max-age=60`, `public`, ETag,
+dan `no-cache` bawaan `send_file` semuanya ditimpa. Kode yang mengirim data
+pengguna tidak perlu mengatur apa pun.
+
+**Akibat CSP: CSS dan JavaScript harus berupa berkas di `app/static`**, dan
+dipanggil dengan `url_for('static', ...)`. Yang diblokir browser: `<script>`
+dan `<style>` di dalam halaman, atribut `style=`, atribut `onclick=` dan
+sejenisnya, URL `javascript:`, serta sumber dari situs lain (CDN, font).
+
+```html
+<link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
+<script src="{{ url_for('static', filename='js/files.js') }}"></script>
+```
+
+Menghubungkan tombol dilakukan dari berkas JS, bukan dari atribut HTML:
+
+```javascript
+document.querySelector("#upload-button").addEventListener("click", send);
+```
+
+**Pratinjau gambar dan video.** Sumber `blob:` dan `data:` ikut diblokir.
+Sajikan pratinjau lewat rute biasa, misalnya
+`<img src="/files/1/view" alt="">` atau `<video src="/files/2/view"
+controls>`, bukan `blob:` atau `data:`: sumber yang sama dengan situs ini
+sudah diizinkan oleh `'self'`. Rute itu tetap memakai `get_owned_or_404`. Bila memang butuh `blob:`
+(misalnya untuk hasil dekripsi di browser), minta persetujuan dulu: yang
+ditambah hanya `img-src 'self' blob:` atau `media-src 'self' blob:`, bukan
+`default-src`.
+
+`tests/test_security_headers.py` memeriksa semua templat di
+`app/templates` dan akan gagal bila ada skrip atau gaya inline, atribut
+`on...=`, URL `javascript:`, atau sumber dari situs lain.
+
+**Daftar periksa manual di browser.** Efek CSP tidak bisa diuji di tes
+otomatis. Sudah dicoba di Safari 26.2: header lengkap di Network, skrip
+inline yang disuntik lewat Console ditolak, halaman login tanpa pelanggaran.
+Chrome dan Firefox: BLOCKED sampai dicoba.
+
+1. Jalankan `python run.py`, buka `http://127.0.0.1:5000/auth/login`, lalu
+   buka DevTools (Console dan Network).
+2. Console tidak boleh berisi pesan `Refused to ...` (CSP) pada
+   `/auth/login`, `/auth/register` dan `/`.
+3. Di Network, klik permintaan halaman: semua header di tabel di atas ada,
+   kecuali `Strict-Transport-Security` (tidak ada di http).
+4. Coba bingkai: simpan `<iframe src="http://127.0.0.1:5000/">` di berkas
+   lokal dan buka; browser harus menolak menampilkannya.
+5. Di Console halaman login jalankan
+   `document.body.insertAdjacentHTML("beforeend", '<img src=x onerror="alert(1)">')`:
+   handler tidak boleh jalan dan Console menampilkan `Refused to execute
+   inline event handler`.
+
 ## Tes yang akan gagal
 
 `tests/test_security_inventory.py` memeriksa semua rute di `app.url_map`:
@@ -197,5 +271,11 @@ lengkap ada di `tests/test_authz.py`.
 
 ## Yang perlu diketahui
 
-Id pengguna dan berkas yang dihapus dapat dipakai ulang (SQLite tanpa
-autoincrement). Tinjau ulang bila fitur hapus akun ditambahkan.
+- Id pengguna dan berkas yang dihapus dapat dipakai ulang (SQLite tanpa
+  autoincrement). Tinjau ulang bila fitur hapus akun ditambahkan.
+- CSP memakai `setdefault`, jadi rute secara teknis bisa melonggarkannya;
+  larangannya hanya ada di dokumen ini.
+- Header `Server` dari server pengembangan membuka versi Werkzeug dan
+  Python. Itu bukan kendali aplikasi; tutup dengan server produksi di depan.
+- Efek CSP baru dicoba manual di satu browser (Safari 26.2). Chrome dan
+  Firefox belum.

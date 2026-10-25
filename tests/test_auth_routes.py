@@ -732,8 +732,10 @@ def test_auth_pages_are_not_cached(site, browser):
         assert response.headers["Cache-Control"] == "no-store"
 
 
-def test_other_pages_do_not_get_the_auth_cache_header(site, browser):
-    assert browser.get("/").headers.get("Cache-Control") != "no-store"
+def test_other_pages_get_no_store_from_the_global_default(site, browser):
+    # Since CP8a every page is no-store (app/security_headers.py); this used
+    # to check that only the auth pages were.
+    assert browser.get("/").headers.get("Cache-Control") == "no-store"
 
 
 # ------------------------------------------------------------ the placeholder
