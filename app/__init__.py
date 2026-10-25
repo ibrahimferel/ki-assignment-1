@@ -78,6 +78,7 @@ def create_app(config_object: Optional[object] = None) -> Flask:
     from app.auth.routes import auth_bp
     from app.auth.throttle import Throttle
     from app.placeholder import main_bp
+    from app.request_limits import register_auth_body_limit
     from app.security_headers import register_security_headers
 
     # One limiter per application: its counts live in this process only.
@@ -90,5 +91,8 @@ def create_app(config_object: Optional[object] = None) -> Flask:
 
     # Security headers on every response (also errors and static files).
     register_security_headers(app)
+
+    # A small body limit for the login and registration pages.
+    register_auth_body_limit(app)
 
     return app

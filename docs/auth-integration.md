@@ -151,7 +151,9 @@ Hal yang perlu diketahui:
 
 - **Batas ukuran:** `MAX_UPLOAD_MB` di `.env` (bawaan 50, artinya
   50 x 1024 x 1024 byte per permintaan). Permintaan yang lebih besar dijawab
-  413. Batas ini berlaku untuk seluruh isi permintaan, bukan per berkas.
+  413. Batas ini berlaku untuk seluruh isi permintaan, bukan per berkas. Form
+  login dan registrasi (`/auth/*`) tidak memakai batas ini, lihat "Batas
+  ukuran form auth".
 - **Penyimpanan:** setiap berkas disimpan sebagai tiga salinan sandi (AES,
   DES, RC4), jadi kebutuhan penyimpanan sekitar tiga kali ukuran berkas.
 - **Log:** jangan mencatat password, kunci (`SECRET_KEY`, `MASTER_KEY`, kunci
@@ -251,6 +253,31 @@ Chrome dan Firefox: BLOCKED sampai dicoba.
    handler tidak boleh jalan dan Console menampilkan `Refused to execute
    inline event handler`.
 
+## Batas ukuran form auth
+
+Permintaan ke `/auth/*` (login, registrasi, logout) dibatasi **16 KiB**
+(16384 byte). `app/request_limits.py` mengaturnya sebelum Flask membaca form,
+jadi sebelum pemeriksaan CSRF, throttle, dan hashing. Batas efektif adalah
+yang lebih kecil antara 16 KiB dan `MAX_CONTENT_LENGTH`; bila
+`MAX_CONTENT_LENGTH` tidak diset, batasnya tetap 16 KiB. Angka ini tetap dan
+tidak bisa diubah lewat `.env`.
+
+- Body tepat 16384 byte diterima; 16385 byte dijawab **413**.
+- Berlaku untuk semua metode di blueprint `auth`. GET dan HEAD tidak membaca
+  body, jadi tidak terpengaruh.
+- 413 adalah halaman bawaan Werkzeug, sama untuk semua rute, dengan header
+  keamanan dan `no-store` seperti jawaban lain. Isinya tidak menyebut angka
+  batas.
+- 413 **tidak dihitung** sebagai percobaan login atau registrasi. Klien yang
+  sedang diblokir throttle tetap mendapat 413 (bukan 429) untuk permintaan
+  yang terlalu besar.
+- Form sah terbesar (nama 32 karakter, sandi 128 karakter hasil NFKC dengan
+  setiap byte di-percent-encode, ditambah konfirmasi sandi dan token CSRF)
+  berukuran 7139 byte, jadi masih ada sisa sekitar 9 KiB.
+- Rute di luar blueprint `auth` (unggah berkas, dan seterusnya) tetap memakai
+  `MAX_CONTENT_LENGTH`. Tes atau skrip yang mengirim body lebih dari 16 KiB ke
+  `/auth/*` akan mendapat 413.
+
 ## Tes yang akan gagal
 
 `tests/test_security_inventory.py` memeriksa semua rute di `app.url_map`:
@@ -279,3 +306,11 @@ lengkap ada di `tests/test_authz.py`.
   Python. Itu bukan kendali aplikasi; tutup dengan server produksi di depan.
 - Efek CSP baru dicoba manual di satu browser (Safari 26.2). Chrome dan
   Firefox belum.
+- Form di `/auth/*` dibatasi 16 KiB (413 bila lebih besar); rute lain
+  dibatasi `MAX_CONTENT_LENGTH` (50 MB bawaan). Body urlencoded tanpa
+  Content-Length (chunked) tidak ditolak, tetapi dipotong di batas. Perilaku
+  chunked ini diamati di server pengembangan Werkzeug; server produksi
+  (gunicorn/nginx) belum diuji.
+- 413 tidak dibatasi lajunya: penyerang bisa mengirim body besar berulang.
+  Biaya per permintaan kecil karena body tidak dibaca, tetapi tidak ada
+  batas laju.

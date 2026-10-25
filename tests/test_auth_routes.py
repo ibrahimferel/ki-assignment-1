@@ -245,7 +245,10 @@ REGISTER_ERRORS = [
     ("ünal", GOOD, None, "Username may only contain"),
     ("alice", "short", None, "Password is too short."),
     ("alice", "x" * 129, None, "Password is too long."),
-    ("alice", "x" * 50_000, None, "Password is too long."),
+    # 5_000 characters: far above the limits of the service, below the 16 KiB
+    # body limit of /auth/* (bigger bodies are answered 413, see
+    # tests/test_auth_body_limit.py).
+    ("alice", "x" * 5_000, None, "Password is too long."),
     ("alice", "bad\x00password", None, "characters that are not allowed"),
     ("alice", "password123", None, "Password is too common."),
     ("longusername", "LongUserName", None, "must not be the username"),
@@ -406,7 +409,7 @@ FAILED_LOGINS = [
     ("ünal", GOOD),
     ("a" * 500, GOOD),
     ("alice", "x" * 500),
-    ("alice", "x" * 100_000),
+    ("alice", "x" * 5_000),  # below the 16 KiB body limit of /auth/*
     ("alice", "bad\x00password"),
 ]
 

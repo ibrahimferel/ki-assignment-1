@@ -370,7 +370,7 @@ def test_a_refused_login_costs_no_password_work(site, browser, monkeypatch):
     monkeypatch.setattr(
         services, "_verify", lambda *a, **k: hashed.append(1) or False
     )
-    response = login(browser, "alice", "x" * 100_000)
+    response = login(browser, "alice", "x" * 5_000)  # below the 16 KiB limit
     assert response.status_code == 429
     assert hashed == []
 
