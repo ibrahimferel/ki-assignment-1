@@ -1,8 +1,12 @@
 # Model Data (CP2) - Rencana dan Penjelasan
 
-Status: **DRAF, menunggu persetujuan Anggota 1.** Dokumen ini belum berisi
-kode. Tidak ada tabel yang dibuat sebelum dokumen ini disetujui (kode model
-baru ditulis di CP3).
+Status: tabel `user`, `stored_file` dan `cipher_copy`, `PRAGMA foreign_keys`,
+`init_db.py`, autentikasi, dan helper kepemilikan (`app/authz.py`) **sudah
+diimplementasikan dan diuji** di branch `feature/core-auth`. **Modul
+enkripsi, layanan unggah/unduh, dan penyimpanan ciphertext belum ada**: bagian
+5 (isi kolom kunci), 7 (urutan tulis), 8.1 di bawah masih rancangan
+untuk Anggota 2 dan 3. Cara memakai bagian yang sudah ada: lihat
+`docs/auth-integration.md`.
 
 Penulis: Anggota 1 (Backend, Autentikasi, dan Basis Data).
 Dibaca oleh: Anggota 2 (kriptografi) dan Anggota 3 (penyimpanan/unggah).
@@ -18,7 +22,7 @@ Dokumen ini menurunkannya menjadi skema.
 | 1b | Salinan yang diunduh | Pengguna memilih salinan; **default AES** |
 | 2 | Pengelolaan kunci | **K3**: kunci acak per salinan, dibungkus master key di `.env` yang terpisah dari `SECRET_KEY` |
 | 3 | Folder ciphertext | `instance/storage/` (sudah tercakup `instance/` di `.gitignore`) |
-| 4 | `MAX_UPLOAD_MB` | Diusulkan **50** (bagian 9, menunggu persetujuan) |
+| 4 | `MAX_UPLOAD_MB` | **50** (bawaan di `app/config.py` dan `.env.example`; bagian 9) |
 
 ## 2. Gambaran entitas
 
@@ -43,7 +47,7 @@ menjadi satu blob lalu dienkripsi lewat jalur yang sama dengan file.
 
 Alasan: satu jalur kode berarti satu tempat untuk diuji dan satu aturan
 akses. Konsekuensinya data pribadi juga menjadi tiga salinan. Alternatif
-(tabel kolom terenkripsi terpisah) ada di pertanyaan terbuka nomor 1.
+(tabel kolom terenkripsi terpisah) ada di bagian 13 (keputusan nomor 1).
 
 Nilai `kind` (daftar tertutup): `personal_data`, `id_card`, `document`,
 `video`.
@@ -65,12 +69,10 @@ data hilang.
 
 - Username dinormalisasi ke huruf kecil sebelum disimpan dan dicari, supaya
   "Budi" dan "budi" tidak menjadi dua akun. Aturan karakter dan panjang
-  (usulan 3 sampai 32 karakter, huruf/angka/garis bawah) ditetapkan di CP5.
-- Hash memakai fungsi bawaan Werkzeug. Versi default Werkzeug 3.x memakai
-  scrypt, yang butuh dukungan `hashlib.scrypt` di Python. **Belum diperiksa
-  di Python 3.9.6 pada Mac Anda** (build macOS tertentu tidak
-  menyertakannya). Ini diperiksa di awal CP5; jika tidak ada, metode hash
-  ditetapkan eksplisit (misalnya pbkdf2) dan dicatat di laporan.
+  ditetapkan di `app/auth/services.py`: 3 sampai 32 karakter ASCII
+  (`a-z`, `0-9`, `.`, `_`, `-`), diawali dan diakhiri huruf atau angka.
+- Sandi 10 sampai 128 karakter (dinormalisasi NFKC). Hash memakai **Argon2id**
+  lewat `argon2-cffi` (parameter bawaan pustaka), bukan fungsi hash Werkzeug.
 
 ## 4. Tabel `stored_file`
 
@@ -139,30 +141,30 @@ Catatan:
 
 | # | Aturan | Ditegakkan oleh | Diuji di |
 | --- | --- | --- | --- |
-| I1 | Setiap `stored_file` punya tepat tiga `cipher_copy` (AES, DES, RC4) | layanan unggah (satu transaksi) | CP3/CP5, tes model dan layanan |
-| I2 | Tidak ada `stored_file` setengah jadi: salah satu enkripsi gagal berarti seluruh unggahan dibatalkan | layanan unggah | tes dengan kegagalan yang disuntikkan |
-| I3 | `UNIQUE (file_id, algorithm)` dan `UNIQUE (storage_name)` | database | CP3, tes model |
-| I4 | Hapus pengguna atau data menghapus baris turunannya | database (FK cascade) | CP3, tes model |
-| I5 | Setiap akses data lewat `owner_id` pengguna yang login | layanan akses | CP7, CP8 |
-| I6 | Kunci tidak pernah ditulis ke log, pesan galat, atau database dalam bentuk mentah | semua; ditinjau di CP8 | CP8, pencarian dan tes |
+| I1 | Setiap `stored_file` punya tepat tiga `cipher_copy` (AES, DES, RC4) | layanan unggah (satu transaksi) | belum: layanan unggah belum ada |
+| I2 | Tidak ada `stored_file` setengah jadi: salah satu enkripsi gagal berarti seluruh unggahan dibatalkan | layanan unggah | belum: layanan unggah belum ada |
+| I3 | `UNIQUE (file_id, algorithm)` dan `UNIQUE (storage_name)` | database | `tests/test_models.py` |
+| I4 | Hapus pengguna atau data menghapus baris turunannya | database (FK cascade) | `tests/test_models.py` |
+| I5 | Setiap akses data lewat `owner_id` pengguna yang login | `app/authz.py` (`get_owned_or_404`, `owned_select`) | `tests/test_authz.py`, `tests/test_security_inventory.py` |
+| I6 | Kunci tidak pernah ditulis ke log, pesan galat, atau database dalam bentuk mentah | semua | sebagian: tes sapuan rahasia di respons dan log (`tests/test_security_inventory.py`); kunci per berkas belum ada |
 
 **Peringatan SQLite (penting untuk I3 dan I4):** SQLite mengabaikan foreign
 key dan cascade kecuali `PRAGMA foreign_keys=ON` dijalankan pada **setiap
-koneksi**. Flask-SQLAlchemy tidak melakukannya otomatis. Rencana CP3:
-pasang pendengar peristiwa koneksi untuk mengaktifkannya, dan tulis tes yang
-membuktikan baris turunan benar-benar terhapus (tes ini harus gagal dulu
-jika pragma dimatikan).
+koneksi**. Flask-SQLAlchemy tidak melakukannya otomatis. Sudah diterapkan:
+pendengar peristiwa koneksi di `app/db_pragmas.py`, dengan tes di
+`tests/test_models.py` yang membuktikan baris turunan benar-benar terhapus
+dan gagal bila pragma dimatikan.
 
 ## 7. Penyimpanan ciphertext
 
 - Lokasi: `instance/storage/`, satu file per `cipher_copy`, bernama
   `storage_name` (string acak, bukan dari masukan pengguna).
-- Pembuat folder: **perintah inisialisasi basis data (CP3)**, idempoten, izin
-  `0700`. Kode Anggota 3 mengasumsikan folder sudah ada dan tidak membuatnya
+- Pembuat folder: **perintah inisialisasi basis data (`init_db.py`)**,
+  idempoten, izin `0700` (folder lama yang lebih longgar diperketat). Kode Anggota 3 mengasumsikan folder sudah ada dan tidak membuatnya
   sendiri di jalur biasa.
 - Lokasi diatur lewat konfigurasi (`STORAGE_DIR`); `TestingConfig` memakai
   folder sementara yang unik per instance dan dihapus setelah tes.
-- Urutan tulis saat unggah: tulis semua file ke disk, lalu commit database.
+- Rancangan (layanan belum ada): urutan tulis saat unggah: tulis semua file ke disk, lalu commit database.
   Jika commit gagal, file yang sudah ditulis dihapus. Sebaliknya saat hapus:
   hapus baris database, lalu file. File yatim (ada di disk, tidak di
   database) tidak berbahaya tetapi dicatat dan diuji; baris tanpa file
@@ -170,9 +172,9 @@ jika pragma dimatikan).
 
 ## 8. Alur
 
-### 8.1 Unggah
+### 8.1 Unggah (rancangan; belum diimplementasikan)
 
-1. Pengguna login; rute unggah memeriksa sesi (CP6).
+1. Pengguna login; rute unggah memeriksa sesi (`@login_required`, lihat `docs/auth-integration.md`).
 2. Anggota 3 menerima masukan, memeriksa ukuran dan `kind`, mengubah teks
    data pribadi menjadi satu blob.
 3. Anggota 2 menghasilkan tiga kunci acak, mengenkripsi tiga kali, mencatat
@@ -182,27 +184,27 @@ jika pragma dimatikan).
    `cipher_copy` dalam **satu transaksi**. Gagal di mana pun berarti
    semuanya dibatalkan (I2).
 
-### 8.2 Unduh
+### 8.2 Unduh (rancangan; pencarian bermilik sudah ada)
 
 1. Pengguna memilih data dan algoritma (default AES; nilai selain
    `AES`/`DES`/`RC4` ditolak dengan 400).
 2. Layanan mencari data berdasarkan `id` **dan** `owner_id` pengguna (I5).
    Data milik orang lain dijawab 404, sama seperti data yang tidak ada, agar
-   keberadaannya tidak bocor. (Dikonfirmasi di CP7.)
+   keberadaannya tidak bocor. Sudah diterapkan oleh `get_owned_or_404` di
+   `app/authz.py`; jawaban 404 yang identik dibuktikan oleh `tests/test_authz.py`.
 3. Layanan membuka `wrapped_key` dengan master key, membaca file, dan
    Anggota 2 mendekripsinya.
 4. Hasil dikirim dengan nama unduhan yang sudah dibersihkan.
 
-## 9. Konfigurasi baru dan usulan `MAX_UPLOAD_MB`
+## 9. Konfigurasi baru dan `MAX_UPLOAD_MB`
 
-Perubahan pada `app/config.py` dan `.env.example` **bukan bagian dokumen
-ini**; ia dikerjakan sebagai checkpoint terpisah dengan persetujuan:
+Perubahan ini sudah diterapkan di `app/config.py` dan `.env.example`:
 
 | Variabel | Aturan |
 | --- | --- |
 | `MASTER_KEY` | wajib; heksadesimal 64 karakter (32 byte); tidak boleh sama dengan `SECRET_KEY`; gagal start jika salah (gaya `ConfigError`) |
 | `STORAGE_DIR` | opsional; default `instance/storage` |
-| `MAX_UPLOAD_MB` | usulan nilai awal 50 (di bawah) |
+| `MAX_UPLOAD_MB` | bawaan 50 (alasan di bawah); harus bilangan bulat lebih dari 0 |
 
 Seperti `SECRET_KEY`, validasi `MASTER_KEY` hanya memeriksa format dan
 panjang, bukan keacakan.
@@ -234,9 +236,10 @@ Alasan memilih 50:
 - Berkas uji sebaiknya ≤ 40 MB agar ada sisa untuk overhead multipart dan
   kolom formulir lain.
 
-Konsekuensi mengubah angka dari 100 ke 50: `DEFAULT_MAX_UPLOAD_MB` di
-`app/config.py`, nilai di `.env.example`, dan ekspektasi di
-`verify_config.py` harus diubah bersama (satu checkpoint, diuji ulang).
+Nilai 50 sudah dipakai di `DEFAULT_MAX_UPLOAD_MB` (`app/config.py`) dan di
+`.env.example`. Mengubahnya berarti mengubah kedua tempat itu dan tes di
+`tests/test_config.py` bersama-sama. Catatan: form `/auth/*` punya batas
+sendiri yang lebih kecil, 16 KiB (lihat `docs/auth-integration.md`).
 
 ## 10. Keterbatasan (untuk laporan)
 
@@ -262,10 +265,14 @@ Konsekuensi mengubah angka dari 100 ke 50: `DEFAULT_MAX_UPLOAD_MB` di
   ulang; data uji hilang.
 - Id bilangan bulat berurutan dapat ditebak; perlindungannya adalah
   pemeriksaan `owner_id` (I5), bukan kerahasiaan id.
+- Id pengguna dan berkas yang dihapus dapat dipakai ulang (SQLite tanpa
+  autoincrement); tinjau ulang bila fitur hapus akun ditambahkan.
+- Keterbatasan keamanan HTTP (pembatas percobaan, sesi, CSP, ukuran body):
+  lihat bagian Keterbatasan di `README.md`.
 
 ## 11. Gaya model dan hal teknis
 
-- Usulan gaya model: **`db.Column` klasik** untuk seluruh tim. Alasan: lebih
+- Gaya model yang dipakai: **`db.Column` klasik** untuk seluruh tim. Alasan: lebih
   sedikit jebakan tipe pada Python 3.9 (tidak ada sintaks `X | None`) dan
   lebih mudah dibaca pemula. Flask-SQLAlchemy 3.1.1 mendukung keduanya.
 - Waktu disimpan sebagai UTC, naive di SQLite (SQLite tidak menyimpan zona).
@@ -278,36 +285,30 @@ Konsekuensi mengubah angka dari 100 ke 50: `DEFAULT_MAX_UPLOAD_MB` di
 | --- | --- |
 | Anggota 2 | Menyediakan: enkripsi satu blob menjadi tiga hasil (algoritma, mode, iv, kunci terbungkus, ciphertext, waktu) dan kebalikannya untuk satu salinan. Memilih mode dan format `wrapped_key`. Memastikan pustaka DES/RC4 (kemungkinan butuh PyCryptodome) dan menambahkannya ke `requirements.txt` bersama. Memutuskan apakah file diproses utuh di memori atau bertahap (memengaruhi bagian 9.1). |
 | Anggota 3 | Menyediakan: formulir unggah, pemilihan algoritma saat unduh (default AES), pembersihan nama unduhan, validasi `kind` dan ukuran. Tidak membuat folder penyimpanan di jalur biasa. Tidak menyimpan apa pun di luar `instance/storage/`. |
-| Anggota 1 | Menyediakan: model, perintah inisialisasi database (membuat tabel dan folder), pendengar pragma FK, layanan simpan/ambil/hapus yang selalu menyaring `owner_id`, konfigurasi `MASTER_KEY` dan `STORAGE_DIR`. |
+| Anggota 1 | Sudah ada: model, `init_db.py` (membuat tabel dan folder), pendengar pragma FK, `app/authz.py` (`get_owned_or_404`, `owned_select`: pencarian yang selalu menyaring `owner_id`), konfigurasi `MASTER_KEY`, `STORAGE_DIR` dan `MAX_UPLOAD_MB`, autentikasi. Belum ada: layanan simpan/ambil/hapus berkas (bergantung pada modul enkripsi). |
 
-## 13. Pertanyaan terbuka (butuh jawaban Anda)
+## 13. Keputusan yang diambil (dulu pertanyaan terbuka)
 
-1. **Data pribadi teks**: setuju diperlakukan seragam sebagai `stored_file`
-   dengan `kind=personal_data` (bagian 2.1)? Alternatif: tabel terpisah
-   dengan kolom terenkripsi, lebih mirip "basis data" biasa tetapi menambah
-   jalur kode.
-2. **Kunci per salinan** (bagian 5) atau satu kunci per data dengan
-   turunan per algoritma? Rekomendasi: per salinan.
-3. **Nilai `MAX_UPLOAD_MB`**: 50 (rekomendasi) atau tetap 100?
-4. **404 untuk data milik orang lain** (bagian 8.2) sebagai arah awal?
-5. **Gaya model**: `db.Column` (rekomendasi) atau `Mapped[...]`?
-6. **`encrypt_seconds` disimpan di database** (bagian 5), atau analisis
-   performa hanya lewat skrip benchmark terpisah?
-7. **`.gitignore` tanpa `*.db`**: ditambahkan sebagai pengaman, atau
-   dibiarkan karena basis data ada di `instance/`?
+| # | Pertanyaan | Keputusan | Bukti di repo |
+| --- | --- | --- | --- |
+| 1 | Data pribadi teks | Seragam sebagai `stored_file` dengan `kind=personal_data` | `KINDS` di `app/models.py` |
+| 2 | Kunci per salinan atau per data | Per salinan (`wrapped_key` di `cipher_copy`); pembuatan kuncinya belum ada | `app/models.py` |
+| 3 | `MAX_UPLOAD_MB` | 50 | `app/config.py`, `.env.example` |
+| 4 | 404 untuk data milik orang lain | Ya | `app/authz.py`, `tests/test_authz.py` |
+| 5 | Gaya model | `db.Column` | `app/models.py` |
+| 6 | `encrypt_seconds` di database | Ya, kolom di `cipher_copy` | `app/models.py` |
+| 7 | `.gitignore` tanpa `*.db` | `*.db` ditambahkan | `.gitignore` |
 
-## 14. Rencana checkpoint berikutnya (belum dikerjakan)
+## 14. Status pekerjaan
 
-| CP | Isi | Menyentuh file |
+| Bagian | Status | Berkas utama |
 | --- | --- | --- |
-| CP2b | Ubah konfigurasi: `MASTER_KEY`, `STORAGE_DIR`, `MAX_UPLOAD_MB` | `app/config.py`, `.env.example`, `verify_config.py` |
-| CP3 | Model, pragma FK, perintah inisialisasi database + folder penyimpanan | `app/models.py`, `app/__init__.py` (atau `app/db_init.py`) |
-| CP4 | Infrastruktur tes | `tests/conftest.py` |
-| CP5 | Layanan autentikasi | `app/auth/services.py` |
-| CP6 | Rute autentikasi, cookie sesi | `app/auth/routes.py`, `requirements.txt` |
-| CP7 | Otorisasi | layanan akses |
-| CP8 | Tes integrasi dan keamanan | `tests/` |
-| CP9 | Dokumentasi dan penggabungan | `docs/` |
-
-Tiap checkpoint dikerjakan satu unit kecil, dengan tinjauan dan pengujian,
-lalu berhenti untuk persetujuan.
+| Konfigurasi dan validasi `.env` | selesai, diuji | `app/config.py`, `tests/test_config.py` |
+| Model data dan pragma FK | selesai, diuji | `app/models.py`, `app/db_pragmas.py`, `tests/test_models.py` |
+| Inisialisasi database dan folder penyimpanan | selesai, diuji | `init_db.py`, `app/database.py`, `tests/test_init_db.py` |
+| Autentikasi, sesi, CSRF, pembatas percobaan | selesai, diuji | `app/auth/`, `tests/test_auth*.py` |
+| Otorisasi kepemilikan data | selesai, diuji | `app/authz.py`, `tests/test_authz.py` |
+| Header keamanan, CSP, batas body `/auth/*` | selesai, diuji | `app/security_headers.py`, `app/request_limits.py` |
+| Modul enkripsi AES/DES/RC4 | belum ada | milik Anggota 2 |
+| Unggah, unduh, penyimpanan ciphertext | belum ada | milik Anggota 3 |
+| Analisis performa | belum ada | |

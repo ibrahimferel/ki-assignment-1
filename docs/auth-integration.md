@@ -240,13 +240,16 @@ otomatis. Sudah dicoba di Safari 26.2: header lengkap di Network, skrip
 inline yang disuntik lewat Console ditolak, halaman login tanpa pelanggaran.
 Chrome dan Firefox: BLOCKED sampai dicoba.
 
-1. Jalankan `python run.py`, buka `http://127.0.0.1:5000/auth/login`, lalu
-   buka DevTools (Console dan Network).
+1. Jalankan `python run.py`, buka `http://127.0.0.1:8000/auth/login`, lalu
+   buka DevTools (Console dan Network). Bila port 8000 terpakai, jalankan
+   `python run.py --port 8001` dan ganti 8000 dengan 8001 di langkah-langkah
+   ini. (Port 5000 sengaja bukan bawaan: di macOS sering dipakai layanan
+   AirPlay Receiver.)
 2. Console tidak boleh berisi pesan `Refused to ...` (CSP) pada
    `/auth/login`, `/auth/register` dan `/`.
 3. Di Network, klik permintaan halaman: semua header di tabel di atas ada,
    kecuali `Strict-Transport-Security` (tidak ada di http).
-4. Coba bingkai: simpan `<iframe src="http://127.0.0.1:5000/">` di berkas
+4. Coba bingkai: simpan `<iframe src="http://127.0.0.1:8000/">` di berkas
    lokal dan buka; browser harus menolak menampilkannya.
 5. Di Console halaman login jalankan
    `document.body.insertAdjacentHTML("beforeend", '<img src=x onerror="alert(1)">')`:
@@ -306,6 +309,8 @@ lengkap ada di `tests/test_authz.py`.
   Python. Itu bukan kendali aplikasi; tutup dengan server produksi di depan.
 - Efek CSP baru dicoba manual di satu browser (Safari 26.2). Chrome dan
   Firefox belum.
+- Aplikasi tidak mencatat log audit: tidak ada catatan login gagal atau
+  jawaban 429 (kode aplikasi tidak memakai `logging`).
 - Form di `/auth/*` dibatasi 16 KiB (413 bila lebih besar); rute lain
   dibatasi `MAX_CONTENT_LENGTH` (50 MB bawaan). Body urlencoded tanpa
   Content-Length (chunked) tidak ditolak, tetapi dipotong di batas. Perilaku
