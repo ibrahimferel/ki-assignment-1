@@ -27,7 +27,7 @@ def _tag(mac_key, algorithm, mode, iv, body):
     header = (_MAC_LABEL + algorithm.encode() + (mode.encode() if mode else b"") + (iv if iv else b""))
     return hmac.new(mac_key, header + body, hashlib.sha256).digest()
 
-def encrypt_one(algorithm: str, key: bytes, plaintext: bytes, mac_key: bytes) -> EncryptedCopy:
+def encrypt_one(algorithm: str, key: bytes, plaintext: bytes) -> EncryptedCopy:
     if algorithm not in ALGORITHMS:
         raise CryptoError(f"Unsupported algorithm")
     if not isinstance(plaintext, (bytes, bytearray)):
@@ -36,7 +36,7 @@ def encrypt_one(algorithm: str, key: bytes, plaintext: bytes, mac_key: bytes) ->
     mac_key = secrets.token_bytes(MAC_KEY_LENGTH)
     
     start_time = time.perf_counter()
-    raw_result = ciphers.encrypt(algorithm, key, plaintext)
+    raw_result = ciphers.encrypt(algorithm, cipher_key, plaintext)
     encryption_time = time.perf_counter() - start_time
 
     tag = _tag(mac_key, algorithm, raw_result.mode, raw_result.iv, raw_result.ciphertext)
@@ -46,9 +46,9 @@ def encrypt_one(algorithm: str, key: bytes, plaintext: bytes, mac_key: bytes) ->
         algorithm=algorithm,
         mode=raw_result.mode,
         iv=raw_result.iv,
-        ciphertext=raw_result.ciphertext,
+        ciphertext=raw_result.ciphertext + tag,
         wrapped_key=wrapped_key,
-        encryption_times=max(encryption_time, 0.0)
+        encryption_time=max(encryption_time, 0.0)
     )
 
 def encrypt_all(plaintext: bytes, master_key: bytes) -> List[EncryptedCopy]:
@@ -81,4 +81,4 @@ def decrypt_copy(
 
     if not hmac.compare_digest(tag, _tag(mac_key, algorithm, mode, iv, body)):
         raise CryptoError(f"Invalid tag")
-    return ciphers.decrypt(algorithm, cipher_key, mode, iv, bytes(body))
+    return ciphers.decrypt(algorithm, cipher_key, bytes(body), mode, iv)
