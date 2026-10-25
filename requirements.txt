@@ -5,6 +5,8 @@ python-dotenv==1.2.1
 
 # Authentication (Member 1)
 argon2-cffi==25.1.0
+Flask-Login==0.6.3
+Flask-WTF==1.2.2
 
 # Testing
 pytest==8.4.2

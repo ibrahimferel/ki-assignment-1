@@ -747,3 +747,43 @@ def test_every_test_starts_with_empty_tables(app):
 def test_the_client_fixture_talks_to_the_app(client):
     # No routes exist yet; a 404 proves the request reached the app.
     assert client.get("/").status_code == 404
+
+
+# ---------------------------------------------------- Flask-Login interface
+
+
+def test_user_has_the_flask_login_flags():
+    user = User(username="alice", password_hash="x" * 20)
+    assert user.is_authenticated is True
+    assert user.is_active is True
+    assert user.is_anonymous is False
+    for name in ("is_authenticated", "is_active", "is_anonymous"):
+        assert isinstance(User.__dict__[name], property)
+
+
+def test_get_id_is_the_saved_id_as_a_string(make_user):
+    user = make_user("alice")
+    assert user.get_id() == str(user.id) == "1"
+    assert isinstance(user.get_id(), str)
+
+
+def test_get_id_refuses_a_user_that_is_not_saved_yet():
+    user = User(username="alice", password_hash="x" * 20)
+    with pytest.raises(ValueError, match="save it"):
+        user.get_id()
+
+
+def test_user_does_not_inherit_usermixin():
+    # UserMixin.__eq__ compares ids, so two unsaved users (id None) would be
+    # equal. The interface is written out on User instead.
+    assert "UserMixin" not in [cls.__name__ for cls in User.__mro__]
+    assert User.__eq__ is object.__eq__
+    source = (PROJECT_ROOT / "app" / "models.py").read_text()
+    assert "flask_login" not in source
+
+
+def test_unsaved_users_are_different_objects():
+    first = User(username="alice", password_hash="x" * 20)
+    second = User(username="bobby", password_hash="x" * 20)
+    assert first != second and first == first
+    assert len({first, second}) == 2

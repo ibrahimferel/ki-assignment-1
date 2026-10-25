@@ -45,6 +45,7 @@ def test_a_minimal_environment_gives_the_documented_defaults():
     assert config.MASTER_KEY == bytes.fromhex(MASTER)
     assert len(config.MASTER_KEY) == 32
     assert config.DEBUG is False
+    assert config.SESSION_COOKIE_SECURE is False
     assert config.MAX_CONTENT_LENGTH == 50 * MIB
     assert config.SQLALCHEMY_DATABASE_URI == "sqlite:///app.db"
     assert config.STORAGE_DIR == BASE_DIR / "instance" / "storage"
@@ -56,6 +57,7 @@ def test_config_exposes_exactly_the_documented_settings():
         "SECRET_KEY",
         "MASTER_KEY",
         "DEBUG",
+        "SESSION_COOKIE_SECURE",
         "SQLALCHEMY_DATABASE_URI",
         "MAX_CONTENT_LENGTH",
         "STORAGE_DIR",
@@ -160,6 +162,45 @@ def test_flask_debug_rejects_anything_else(raw):
     refused(make_env(FLASK_DEBUG=raw), "FLASK_DEBUG")
 
 
+# ---------------------------------------------------- SESSION_COOKIE_SECURE
+
+
+@pytest.mark.parametrize(
+    "raw, expected",
+    [
+        ("1", True),
+        ("true", True),
+        ("TRUE", True),
+        (" yes ", True),
+        ("on", True),
+        ("0", False),
+        ("false", False),
+        ("No", False),
+        ("off", False),
+        ("", False),
+        ("  ", False),
+    ],
+)
+def test_session_cookie_secure_accepts_only_clear_values(raw, expected):
+    config = Config(environ=make_env(SESSION_COOKIE_SECURE=raw))
+    assert config.SESSION_COOKIE_SECURE is expected
+
+
+@pytest.mark.parametrize("raw", ["maybe", "2", "enabled", "nope", "ture"])
+def test_session_cookie_secure_rejects_anything_else(raw):
+    message = refused(
+        make_env(SESSION_COOKIE_SECURE=raw), "SESSION_COOKIE_SECURE"
+    )
+    assert raw not in message  # the message names the variable, not the value
+
+
+def test_session_cookie_secure_and_flask_debug_are_independent():
+    secure = Config(environ=make_env(SESSION_COOKIE_SECURE="1"))
+    assert secure.SESSION_COOKIE_SECURE is True and secure.DEBUG is False
+    debug = Config(environ=make_env(FLASK_DEBUG="1"))
+    assert debug.DEBUG is True and debug.SESSION_COOKIE_SECURE is False
+
+
 # ----------------------------------------------------------- MAX_UPLOAD_MB
 
 
@@ -236,6 +277,7 @@ def real_environment(monkeypatch, tmp_path):
         "SECRET_KEY",
         "MASTER_KEY",
         "FLASK_DEBUG",
+        "SESSION_COOKIE_SECURE",
         "MAX_UPLOAD_MB",
         "DATABASE_URL",
         "STORAGE_DIR",
@@ -257,6 +299,16 @@ def test_config_without_environ_reads_os_environ_after_loading_dotenv(
     assert real_environment == [BASE_DIR / ".env"]
 
 
+def test_config_without_environ_reads_session_cookie_secure(
+    real_environment, monkeypatch
+):
+    monkeypatch.setenv("SECRET_KEY", SECRET)
+    monkeypatch.setenv("MASTER_KEY", MASTER)
+    assert Config().SESSION_COOKIE_SECURE is False
+    monkeypatch.setenv("SESSION_COOKIE_SECURE", "1")
+    assert Config().SESSION_COOKIE_SECURE is True
+
+
 def test_config_without_environ_refuses_when_nothing_is_set(real_environment):
     with pytest.raises(ConfigError, match="SECRET_KEY"):
         Config()
@@ -269,6 +321,7 @@ def test_testing_config_exposes_exactly_the_documented_settings():
     assert upper_case_settings(TestingConfig()) == {
         "TESTING",
         "DEBUG",
+        "SESSION_COOKIE_SECURE",
         "SQLALCHEMY_DATABASE_URI",
         "MAX_CONTENT_LENGTH",
         "SECRET_KEY",
@@ -281,6 +334,7 @@ def test_testing_config_exposes_exactly_the_documented_settings():
 def test_testing_config_values():
     config = TestingConfig()
     assert config.TESTING is True and config.DEBUG is False
+    assert config.SESSION_COOKIE_SECURE is False  # the test client is http
     assert config.SQLALCHEMY_DATABASE_URI == "sqlite:///:memory:"
     assert config.MAX_CONTENT_LENGTH == 50 * MIB
     assert config.SQLALCHEMY_ENGINE_OPTIONS == {"hide_parameters": True}
@@ -309,9 +363,11 @@ def test_testing_config_ignores_the_environment(monkeypatch):
     monkeypatch.setenv("DATABASE_URL", "sqlite:///REAL.db")
     monkeypatch.setenv("SECRET_KEY", "z" * 64)
     monkeypatch.setenv("STORAGE_DIR", "/should/not/be/used")
+    monkeypatch.setenv("SESSION_COOKIE_SECURE", "1")
     config = TestingConfig()
     assert config.SQLALCHEMY_DATABASE_URI == "sqlite:///:memory:"
     assert config.SECRET_KEY != "z" * 64
+    assert config.SESSION_COOKIE_SECURE is False
     assert str(config.STORAGE_DIR) != "/should/not/be/used"
 
 
@@ -328,6 +384,7 @@ def test_all_settings_reach_flask_config(tmp_path):
         STORAGE_DIR=str(tmp_path / "store"),
         MAX_UPLOAD_MB="9",
         FLASK_DEBUG="1",
+        SESSION_COOKIE_SECURE="1",
     )
     flask_app = create_app(Config(environ=env))
 
@@ -339,6 +396,7 @@ def test_all_settings_reach_flask_config(tmp_path):
         "hide_parameters": True
     }
     assert flask_app.debug is True
+    assert flask_app.config["SESSION_COOKIE_SECURE"] is True
 
 
 def test_the_default_storage_dir_sits_inside_flasks_instance_folder():

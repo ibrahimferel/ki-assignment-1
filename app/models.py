@@ -78,6 +78,26 @@ class User(db.Model):
             raise TypeError("username must be a string")
         return value.strip().lower()
 
+    # The interface Flask-Login needs. Written out instead of inheriting
+    # ``UserMixin``, whose ``__eq__`` compares ids: two unsaved users (id
+    # None) would compare equal.
+    @property
+    def is_authenticated(self):
+        return True
+
+    @property
+    def is_active(self):
+        return True
+
+    @property
+    def is_anonymous(self):
+        return False
+
+    def get_id(self):
+        if self.id is None:
+            raise ValueError("user has no id yet; save it before logging in")
+        return str(self.id)
+
 
 class StoredFile(db.Model):
     __tablename__ = "stored_file"

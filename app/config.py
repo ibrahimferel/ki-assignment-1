@@ -148,6 +148,11 @@ class Config:
         self.SECRET_KEY = _read_secret_key(environ)
         self.MASTER_KEY = _read_master_key(environ, self.SECRET_KEY)
         self.DEBUG = _read_bool(environ, "FLASK_DEBUG", default=False)
+        # True only behind HTTPS: browsers refuse to send a Secure cookie
+        # over plain http (Safari even on 127.0.0.1), so login would fail.
+        self.SESSION_COOKIE_SECURE = _read_bool(
+            environ, "SESSION_COOKIE_SECURE", default=False
+        )
         self.SQLALCHEMY_DATABASE_URI = _read_database_uri(environ)
         self.MAX_CONTENT_LENGTH = _read_max_upload_mb(environ) * 1024 * 1024
         self.STORAGE_DIR = _read_storage_dir(environ)
@@ -170,6 +175,7 @@ class TestingConfig:
 
     TESTING = True
     DEBUG = False
+    SESSION_COOKIE_SECURE = False  # the test client talks plain http
     SQLALCHEMY_DATABASE_URI = "sqlite:///:memory:"
     MAX_CONTENT_LENGTH = DEFAULT_MAX_UPLOAD_MB * 1024 * 1024
 
