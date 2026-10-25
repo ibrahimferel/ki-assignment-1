@@ -1,9 +1,19 @@
-.env 
-instance/ 
-venv/ 
+# Secrets and local settings (the template .env.example stays tracked)
+.env
+.env.*
+!.env.example
+
+# Local data: database, encrypted files
+instance/
+/storage/
+*.db
+
+# Python
+venv/
 .venv/
-__pycache__/ 
+__pycache__/
 *.pyc
 .pytest_cache/
+
+# macOS
 .DS_Store
-*.db
