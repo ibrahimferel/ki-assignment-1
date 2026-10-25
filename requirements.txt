@@ -8,5 +8,8 @@ argon2-cffi==25.1.0
 Flask-Login==0.6.3
 Flask-WTF==1.2.2
 
+#Cryptography (Member 2)
+cryptography==41.0.3
+
 # Testing
 pytest==8.4.2
