@@ -76,8 +76,11 @@ def create_app(config_object: Optional[object] = None) -> Flask:
 
     # Pages. Imported here for the same reason as the models.
     from app.auth.routes import auth_bp
+    from app.auth.throttle import Throttle
     from app.placeholder import main_bp
 
+    # One limiter per application: its counts live in this process only.
+    app.extensions["throttle"] = Throttle()
     app.register_blueprint(auth_bp)
     app.register_blueprint(main_bp)
     login_manager.login_view = "auth.login"
