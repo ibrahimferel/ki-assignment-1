@@ -41,7 +41,7 @@ def encrypt(algorithm: str, key: bytes, plaintext: bytes, mode: Optional[str] = 
     cipher = module.new(key, module.MODE_CBC, iv=iv)
     """modified"""
     ciphertext = cipher.encrypt(pad(plaintext, block_size))
-    return RawResult(module.MODE_CBC, iv, ciphertext)
+    return RawResult(BLOCK_MODE, iv, ciphertext)
 
 """for decrypting"""
 def decrypt(algorithm: str, key: bytes, ciphertext: bytes, mode: Optional[str] = None, iv: Optional[bytes] = None) -> bytes:

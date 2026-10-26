@@ -7,7 +7,7 @@ from app.crypto.ciphers import key_len
 MASTER_KEY_LENGTH = 32
 WRAP_VERSION = 1
 NONCE_LENGTH = 16
-TAG_LENGTH = 32
+TAG_LENGTH = 16
 _AAD_LABEL = b"cryptoapp|keywrap"
 
 def generate_key(algorithm: str) -> bytes:
@@ -50,13 +50,13 @@ def unwrap_key(master_key: bytes, wrapped_key: bytes, algorithm: str) -> bytes:
     if( 
         not isinstance(wrapped_key, (bytes, bytearray)) 
         or len(wrapped_key) < 1 + NONCE_LENGTH + TAG_LENGTH
-        or wrapped_key[:1] != WRAP_VERSION
+        or wrapped_key[0] != WRAP_VERSION
     ):
         raise CryptoError(f"Invalid wrapped key length")
 
     nonce = wrapped_key[1:1 + NONCE_LENGTH]
-    encrypted = wrapped_key[1 + NONCE_LENGTH:-TAG_LENGTH]
-    tag = wrapped_key[-TAG_LENGTH:]
+    tag = wrapped_key[1 + NONCE_LENGTH:1 + NONCE_LENGTH + TAG_LENGTH]
+    encrypted = wrapped_key[1 + NONCE_LENGTH + TAG_LENGTH:1 + NONCE_LENGTH + TAG_LENGTH + len(wrapped_key) - (1 + NONCE_LENGTH + TAG_LENGTH)]
 
     cipher = AES.new(master_key, AES.MODE_GCM, nonce=nonce, mac_len=TAG_LENGTH)
     cipher.update(aad)
