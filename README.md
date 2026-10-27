@@ -1,22 +1,16 @@
-# Tugas Kriptografi 1: bagian inti (autentikasi, basis data, otorisasi)
+# Cryptography Assignment 1: core module (authentication, database, authorization)
 
-Aplikasi web Flask + SQLite + SQLAlchemy yang dirancang untuk menyimpan data
-pribadi, gambar KTP, dokumen (PDF/DOC/XLS) dan video dalam bentuk terenkripsi
-(AES, DES, RC4). Branch ini (`feature/core-auth`) berisi **bagian inti yang
-dikerjakan Anggota 1**: konfigurasi, model data, login dengan kontrol akses
-per pengguna, dan lapisan keamanan HTTP.
+A Flask + SQLite + SQLAlchemy web application designed to store personal data,
+ID card (KTP) images, documents (PDF/DOC/XLS) and videos in encrypted form
+(AES, DES, RC4).
 
-**Belum ada di branch ini:** modul enkripsi AES/DES/RC4, formulir dan rute
-unggah/unduh berkas, serta analisis performa; folder untuk bagian itu belum
-ada di repo. Panduan untuk anggota lain ada di `docs/auth-integration.md`.
+## Prerequisites
 
-## Prasyarat
+- Python 3.9 (tested versions: 3.9.6 on macOS and 3.9.25 on Linux; other
+  versions have not been tested).
+- `pip` and the `venv` module.
 
-- Python 3.9 (versi yang diuji: 3.9.6 di macOS dan 3.9.25 di Linux; versi lain
-  belum diuji).
-- `pip` dan modul `venv`.
-
-## Instalasi
+## Installation
 
 ```bash
 python -m venv .venv
@@ -24,10 +18,10 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-## Konfigurasi `.env` dan kunci
+## Configuring `.env` and keys
 
-Aplikasi menolak start tanpa `SECRET_KEY` dan `MASTER_KEY`. Salin templat,
-lalu isi kedua kunci **tanpa menampilkannya di layar**:
+The application refuses to start without `SECRET_KEY` and `MASTER_KEY`. Copy the
+template, then fill in both keys **without printing them to the screen**:
 
 ```bash
 cp .env.example .env
@@ -48,161 +42,189 @@ for name in ("SECRET_KEY", "MASTER_KEY"):
         flags=re.MULTILINE,
     )
 path.write_text(text)
-print("Kunci ditulis ke .env (nilai tidak ditampilkan).")
+print("Keys written to .env (values not shown).")
 PY
 ```
+or
+```
+Get-ChildItem -Force .env*
+Copy-Item .env.example .env
+@'
+import re
+import secrets
+from pathlib import Path
 
-Perintah ini hanya mengisi baris yang masih kosong, jadi aman dijalankan ulang
-dan tidak menimpa kunci yang sudah ada. Kedua kunci berbeda satu sama lain.
+path = Path(".env")
+text = path.read_text()
 
-| Variabel | Arti |
+for name in ("SECRET_KEY", "MASTER_KEY"):
+    text = re.sub(
+        rf"^{name}=[ \t]*$",
+        lambda match, name=name: f"{name}={secrets.token_hex(32)}",
+        text,
+        count=1,
+        flags=re.MULTILINE,
+    )
+
+path.write_text(text)
+print("Kunci ditulis ke .env (nilai tidak ditampilkan).")
+'@ | python -
+```
+
+This command only fills lines that are still empty, so it is safe to rerun and
+does not overwrite existing keys. The two keys are different from each other.
+
+| Variable | Meaning |
 | --- | --- |
-| `SECRET_KEY` | wajib; menandatangani cookie sesi dan token CSRF (minimal 32 karakter) |
-| `MASTER_KEY` | wajib; 64 karakter heksadesimal (32 byte), harus berbeda dari `SECRET_KEY`; pelindung kunci per berkas |
-| `FLASK_DEBUG` | `0` (bawaan) atau `1` hanya di mesin sendiri |
-| `SESSION_COOKIE_SECURE` | `1` bila situs disajikan lewat HTTPS; `0` untuk `http://127.0.0.1` |
-| `DATABASE_URL` | opsional; bawaan: SQLite di folder `instance/` |
-| `STORAGE_DIR` | opsional; bawaan: `instance/storage` |
-| `MAX_UPLOAD_MB` | batas satu permintaan unggah, bawaan 50 |
+| `SECRET_KEY` | required; signs the session cookie and CSRF tokens (at least 32 characters) |
+| `MASTER_KEY` | required; 64 hexadecimal characters (32 bytes), must differ from `SECRET_KEY`; protects the per-file keys |
+| `FLASK_DEBUG` | `0` (default) or `1` only on your own machine |
+| `SESSION_COOKIE_SECURE` | `1` when the site is served over HTTPS; `0` for `http://127.0.0.1` |
+| `DATABASE_URL` | optional; default: SQLite in the `instance/` folder |
+| `STORAGE_DIR` | optional; default: `instance/storage` |
+| `MAX_UPLOAD_MB` | limit for a single upload request, default 50 |
 
-**Jangan commit `.env`** (sudah diabaikan oleh `.gitignore`). Simpan cadangan
-`MASTER_KEY` di tempat aman: bila hilang, semua berkas terenkripsi tidak bisa
-dibuka lagi.
+**Do not commit `.env`** (it is already ignored by `.gitignore`). Keep a backup
+of `MASTER_KEY` somewhere safe: if it is lost, none of the encrypted files can
+be opened again.
 
-## Membuat basis data
+## Creating the database
 
 ```bash
 python init_db.py
 ```
 
-Membuat tabel `user`, `stored_file`, `cipher_copy` dan folder penyimpanan.
-Aman dijalankan ulang: data yang ada tidak diubah.
+Creates the `user`, `stored_file` and `cipher_copy` tables and the storage folder.
+Safe to rerun: existing data is not modified.
 
-## Menjalankan
+## Running
 
 ```bash
 python run.py
 ```
 
-Server pengembangan mendengarkan di `http://127.0.0.1:8000` (hanya mesin ini).
-Bila port 8000 terpakai, pilih port lain:
+The development server listens on `http://127.0.0.1:8000` (this machine only).
+If port 8000 is in use, choose another port:
 
 ```bash
 python run.py --port 8001
 ```
 
-Port 5000 sengaja bukan bawaan karena di macOS sering dipakai layanan AirPlay
-Receiver. Halaman yang tersedia: `/` (halaman sementara), `/auth/register`,
-`/auth/login` dan `/auth/logout`.
+Port 5000 is deliberately not the default because on macOS it is often used by
+the AirPlay Receiver service. Available pages: `/` (placeholder page),
+`/auth/register`, `/auth/login` and `/auth/logout`.
 
-## Menjalankan tes
+## Running the tests
 
 ```bash
 python -m pytest -q
 ```
 
-`pytest.ini` menjadikan setiap warning sebagai error. Hasil terakhir di
-macOS: 958 tes lulus. Pemeriksaan gaya (opsional, tidak ada di
-`requirements.txt`): `pip install flake8`, lalu `flake8 app tests`.
+`pytest.ini` turns every warning into an error. Latest result on macOS: 958
+tests passed. Style check (optional, not in `requirements.txt`):
+`pip install flake8`, then `flake8 app tests`.
 
-## Struktur folder
+## Folder structure
 
 ```
 app/
-  __init__.py          application factory (create_app), Flask-Login, CSRF, cookie sesi
-  config.py            pembacaan dan validasi .env (ConfigError bila salah)
+  __init__.py          application factory (create_app), Flask-Login, CSRF, session cookie
+  config.py            reading and validating .env (ConfigError if invalid)
   models.py            User, StoredFile, CipherCopy
-  database.py          pembuatan tabel dan folder penyimpanan (init_db)
-  db_pragmas.py        PRAGMA foreign_keys di setiap koneksi SQLite
-  extensions.py        objek db SQLAlchemy
-  authz.py             get_owned_or_404, owned_select (kepemilikan data)
-  security_headers.py  header keamanan, CSP, Cache-Control
-  request_limits.py    batas body 16 KiB untuk /auth/*
-  placeholder.py       halaman sementara "/"
+  database.py          creating tables and the storage folder (init_db)
+  db_pragmas.py        PRAGMA foreign_keys on every SQLite connection
+  extensions.py        SQLAlchemy db object
+  authz.py             get_owned_or_404, owned_select (data ownership)
+  security_headers.py  security headers, CSP, Cache-Control
+  request_limits.py    16 KiB body limit for /auth/*
+  placeholder.py       placeholder page "/"
   auth/                services (Argon2id), forms, routes, throttle, redirects
   templates/           base.html, placeholder_home.html, auth/login.html, auth/register.html
 docs/
-  auth-integration.md  panduan untuk anggota lain (lindungi rute, CSRF, unggah, CSP)
-  data-model.md        rancangan dan penjelasan model data
-tests/                 tes otomatis (pytest)
-init_db.py             membuat tabel dan folder penyimpanan
-run.py                 pintu masuk server pengembangan
+  auth-integration.md  guide for other members (protecting routes, CSRF, uploads, CSP)
+  data-model.md        data model design and explanation
+tests/                 automated tests (pytest)
+init_db.py             creates the tables and the storage folder
+run.py                 development server entry point
 ```
 
-## Ringkasan keamanan (yang sudah ada dan teruji)
+## Security summary (implemented and tested)
 
-- **Sandi:** hash Argon2id (parameter bawaan `argon2-cffi`); panjang 10 sampai
-  128 karakter, dinormalisasi NFKC, ditolak bila termasuk sandi umum.
-  Nama pengguna 3 sampai 32 karakter ASCII (`a-z`, `0-9`, `.`, `_`, `-`).
-- **Login:** pesan gagal sama untuk sandi salah dan nama tidak dikenal;
-  `session.clear()` sebelum login (anti fixation); proteksi sesi `strong`.
-- **Sesi:** cookie `HttpOnly`, `SameSite=Lax`, `Secure` bila
-  `SESSION_COOKIE_SECURE=1`; berlaku 2 jam dan tidak diperpanjang otomatis.
-- **CSRF:** diwajibkan untuk semua permintaan yang mengubah data.
-- **Pembatas percobaan:** login 5 gagal per pasangan alamat+nama dan 20 per
-  alamat dalam 15 menit; registrasi 10 per alamat per jam. Jawaban 429
-  dengan `Retry-After`.
-- **Header:** `X-Content-Type-Options`, `X-Frame-Options: DENY`,
-  `Referrer-Policy`, `Permissions-Policy`, COOP/CORP, CSP ketat (tanpa
-  skrip/gaya inline), `Cache-Control: no-store` selain untuk berkas statis,
-  HSTS hanya bila cookie `Secure` aktif.
-- **Ukuran body:** `/auth/*` dibatasi 16 KiB (413 bila lebih besar); rute lain
-  mengikuti `MAX_UPLOAD_MB`.
-- **Kontrol akses:** data milik pengguna hanya bisa diakses pemiliknya lewat
-  `get_owned_or_404`; milik orang lain dan tidak ada sama-sama 404. Tes
-  inventaris memeriksa semua rute di `app.url_map` (harus butuh login dan
-  token CSRF).
-- **Rahasia:** `.env`, `instance/` dan file `*.db` diabaikan Git; tes
-  menyapu respons dan log dari sandi, hash dan kunci.
+- **Passwords:** Argon2id hashing (`argon2-cffi` default parameters); length 10 to
+  128 characters, NFKC-normalized, rejected if it is a common password.
+  Usernames are 3 to 32 ASCII characters (`a-z`, `0-9`, `.`, `_`, `-`).
+- **Login:** the same failure message for a wrong password and an unknown
+  username; `session.clear()` before login (anti-fixation); `strong` session
+  protection.
+- **Session:** `HttpOnly`, `SameSite=Lax` cookie, `Secure` when
+  `SESSION_COOKIE_SECURE=1`; valid for 2 hours and not extended automatically.
+- **CSRF:** required for every state-changing request.
+- **Rate limiting:** login allows 5 failures per address+username pair and 20 per
+  address within 15 minutes; registration allows 10 per address per hour.
+  Responds with 429 and `Retry-After`.
+- **Headers:** `X-Content-Type-Options`, `X-Frame-Options: DENY`,
+  `Referrer-Policy`, `Permissions-Policy`, COOP/CORP, strict CSP (no inline
+  scripts/styles), `Cache-Control: no-store` except for static files,
+  HSTS only when the `Secure` cookie is enabled.
+- **Body size:** `/auth/*` is limited to 16 KiB (413 if larger); other routes
+  follow `MAX_UPLOAD_MB`.
+- **Access control:** a user's data can only be accessed by its owner through
+  `get_owned_or_404`; data owned by someone else and data that does not exist
+  both return 404. An inventory test checks every route in `app.url_map` (each
+  must require login and a CSRF token).
+- **Secrets:** `.env`, `instance/` and `*.db` files are ignored by Git; tests
+  scan responses and logs for passwords, hashes and keys.
 
-## Keterbatasan
+## Limitations
 
-Penanda: **[T]** terbukti oleh tes otomatis, **[M]** pengamatan manual,
-**[K]** keputusan rancangan (dibaca dari kode), **[B]** BLOCKED (belum bisa
-diuji).
+Markers: **[T]** proven by automated tests, **[M]** manual observation,
+**[K]** design decision (read from the code), **[B]** BLOCKED (cannot be tested
+yet).
 
-1. Hitungan pembatas percobaan ada di memori satu proses: hilang saat server
-   dihidupkan ulang dan tidak dibagi antar worker. [T]
-2. Pembatas hanya membaca `request.remote_addr`, jadi di belakang proxy semua
-   klien tampak satu alamat; header `X-Forwarded-For` palsu tidak membantu. [T]
-3. Proteksi sesi `strong` Flask-Login memakai `X-Forwarded-For` untuk membentuk
-   identitas sesi; ini tidak memengaruhi pembatas. [M]
-4. Cookie sesi berlaku 2 jam tanpa diperpanjang, dan logout hanya menghapus
-   cookie (tidak ada pencabutan sesi di server). [K]
-5. Id pengguna dan berkas yang dihapus dapat dipakai ulang (SQLite tanpa
-   autoincrement), sehingga cookie lama bisa terpetakan ke pengguna baru;
-   tinjau ulang bila fitur hapus akun ditambahkan. [M]
-6. Form di `/auth/*` dibatasi 16 KiB (413 bila lebih besar); rute lain dibatasi
-   `MAX_CONTENT_LENGTH` (50 MB bawaan). [T]
-7. Body urlencoded tanpa Content-Length (chunked) tidak ditolak, tetapi dipotong
-   di batas. Ini diamati di server pengembangan Werkzeug [M]; server produksi
-   (gunicorn/nginx) belum diuji [B].
-8. Respons 413 tidak dibatasi lajunya (biaya per permintaan kecil karena body
-   tidak dibaca); namun 413 tidak dihitung sebagai percobaan login. [K, T]
-9. CSP dipasang dengan `setdefault`, jadi rute secara teknis bisa
-   melonggarkannya; larangannya hanya ada di dokumen. [K]
-10. Header `Server` dari server pengembangan menampilkan versi Werkzeug dan
-    Python. [M]
-11. Efek CSP baru dicoba manual di Safari 26.2 [M]; Chrome dan Firefox [B].
-12. Header HSTS dan cookie `Secure` hanya diuji lewat pengaturan konfigurasi,
-    belum lewat koneksi TLS sungguhan. [T, B]
-13. Nama pengguna hanya ASCII dan daftar sandi umum berukuran kecil. [T]
-14. Aplikasi tidak mencatat log audit (tidak ada log login gagal atau 429). [K]
-15. Skema dibuat dengan `create_all()` tanpa migrasi; mengubah skema berarti
-    membuat ulang basis data. [K]
-16. Rancangan: DES dan RC4 lemah; ketiga salinan berisi plaintext yang sama,
-    sehingga kerahasiaan data hanya sekuat salinan terlemah; pemegang `.env`
-    dan basis data dapat membuka semua data. Modul enkripsinya belum ada di
-    branch ini. [K]
-17. Angka mutasi di laporan dijalankan di sandbox oleh asisten AI dan tidak
-    direproduksi di macOS. [M]
-18. Hanya Python 3.9 yang diuji. [M]
+1. Rate-limit counters live in the memory of a single process: they are lost when
+   the server restarts and are not shared between workers. [T]
+2. The limiter only reads `request.remote_addr`, so behind a proxy all clients
+   appear as one address; a spoofed `X-Forwarded-For` header does not help. [T]
+3. Flask-Login's `strong` session protection uses `X-Forwarded-For` to build the
+   session identifier; this does not affect the limiter. [M]
+4. The session cookie is valid for 2 hours without extension, and logout only
+   deletes the cookie (there is no server-side session revocation). [K]
+5. IDs of deleted users and files can be reused (SQLite without
+   autoincrement), so an old cookie could map to a new user; revisit this if an
+   account-deletion feature is added. [M]
+6. Forms under `/auth/*` are limited to 16 KiB (413 if larger); other routes are
+   limited by `MAX_CONTENT_LENGTH` (50 MB by default). [T]
+7. A urlencoded body without Content-Length (chunked) is not rejected, but it is
+   truncated at the limit. This was observed on the Werkzeug development server
+   [M]; production servers (gunicorn/nginx) have not been tested [B].
+8. 413 responses are not rate-limited (the per-request cost is small because the
+   body is not read); however, a 413 is not counted as a login attempt. [K, T]
+9. CSP is set with `setdefault`, so a route could technically loosen it; the rule
+   against doing so exists only in the documentation. [K]
+10. The `Server` header from the development server reveals the Werkzeug and
+    Python versions. [M]
+11. The effect of the CSP has only been tried manually in Safari 26.2 [M];
+    Chrome and Firefox [B].
+12. The HSTS header and the `Secure` cookie have only been tested through
+    configuration settings, not over a real TLS connection. [T, B]
+13. Usernames are ASCII only, and the common-password list is small. [T]
+14. The application does not keep an audit log (no log of failed logins or
+    429s). [K]
+15. The schema is created with `create_all()` without migrations; changing the
+    schema means recreating the database. [K]
+16. Design: DES and RC4 are weak; all three copies contain the same plaintext,
+    so data confidentiality is only as strong as the weakest copy; whoever holds
+    `.env` and the database can open all data. The encryption module is not yet
+    in this branch. [K]
+17. The mutation figures in the report were run in a sandbox by an AI assistant
+    and have not been reproduced on macOS. [M]
+18. Only Python 3.9 has been tested. [M]
 
-## Pembagian peran
+## Team roles
 
-| Anggota | Bagian |
+| Member | Responsibility |
 | --- | --- |
-| Anggota 1 | Backend, autentikasi, dan basis data (branch ini) |
-| Anggota 2 | Algoritma Enkripsi dan Deskripsi serta mekanisme key |
-| Anggota 3 | diisi tim |
-| Anggota 4 | diisi tim |
+| Member 1 | Backend, authentication, and database (this branch) |
+| Member 2 | Encryption and decryption algorithms and the key mechanism |
+| Member 3 | to be filled in by the team |
+| Member 4 | to be filled in by the team |
