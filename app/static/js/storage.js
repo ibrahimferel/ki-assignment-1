@@ -27,6 +27,13 @@
     video: {label: 'Symptom video', accept: '.mp4', hint: 'MP4 video'},
     personal_data: {label: 'Personal data'}
   };
+  const viewDialog = document.getElementById('view-dialog');
+  const viewFields = document.getElementById('view-fields');
+  const viewImage = document.getElementById('view-image');
+  const viewError = document.getElementById('view-error');
+  const viewStatus = document.getElementById('view-status');
+  const personalFields = ['nama', 'nik', 'alamat', 'tanggal_lahir'];
+  let viewRequest = 0;
   let items = [];
   let editingId = null;
   let selectedId = null;
@@ -122,6 +129,7 @@
       download.textContent = 'Download original';
       download.setAttribute('aria-label', `Download ${displayName(item)} from its AES copy`);
       actions.append(download, makeButton('Compare methods', () => showComparison(item)));
+      if (item.kind === 'personal_data' || item.kind === 'id_card') actions.append(makeButton('View', () => viewRecord(item)));
       if (item.kind === 'personal_data') actions.append(makeButton('Edit', () => editPersonal(item)));
       actions.append(makeButton('Delete', (button) => openDelete(item, button)));
       row.append(meta, actions); records.append(row);
@@ -240,5 +248,42 @@
   document.getElementById('records-previous').addEventListener('click', () => { page -= 1; render(); });
   document.getElementById('records-next').addEventListener('click', () => { page += 1; render(); });
   document.getElementById('refresh-records').addEventListener('click', async () => { try { await refresh(); say('Records refreshed.'); } catch (error) { say(error.message, true); } });
+  
+  function clearView() {
+  viewRequest += 1;
+  personalFields.forEach((f) => { document.getElementById(`view-${f}`).textContent = ''; });
+  viewFields.hidden = true; viewImage.hidden = true; viewImage.removeAttribute('src');
+  viewError.textContent = ''; viewStatus.textContent = '';
+}
+
+async function viewRecord(item) {
+  clearView();
+  const requestId = viewRequest;
+  document.getElementById('view-title').textContent = displayName(item);
+  viewDialog.showModal();
+  if (item.kind === 'personal_data') {
+    viewStatus.textContent = 'Decrypting...';
+    try {
+      const data = await (await request(`${base}${item.id}/personal`)).json();
+      if (requestId !== viewRequest) return;           // dialog sudah ditutup
+      personalFields.forEach((f) => { document.getElementById(`view-${f}`).textContent = data[f]; });
+      viewFields.hidden = false; viewStatus.textContent = '';
+    } catch (error) { if (requestId === viewRequest) { viewStatus.textContent = ''; viewError.textContent = error.message; } }
+  } else if (item.kind === 'id_card') {
+    viewImage.alt = `Decrypted preview of ${item.name}`;
+    viewImage.src = `${base}${item.id}/view`;
+    viewImage.hidden = false;
+  }
+}
+
+viewImage.addEventListener('error', () => {
+  if (!viewImage.getAttribute('src')) return;
+  viewImage.hidden = true;
+  viewError.textContent = 'The image could not be decrypted or displayed.';
+});
+// Hapus data hasil dekripsi dari DOM begitu dialog ditutup.
+viewDialog.addEventListener('close', clearView);
+  
   refresh().catch((error) => say(error.message, true));
 })();
+
