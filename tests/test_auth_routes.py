@@ -140,6 +140,7 @@ def test_the_route_table_is_exactly_the_documented_one(site):
         ("/storage/upload", ("POST",)),
         ("/storage/personal", ("POST",)),
         ("/storage/<int:file_id>/download/<algorithm>", ("GET",)),
+        ("/storage/<int:file_id>/view", ("GET",)),
         ("/storage/<int:file_id>/comparison", ("GET",)),
         ("/storage/<int:file_id>/personal", ("GET",)),
         ("/storage/<int:file_id>/personal/update", ("POST",)),
