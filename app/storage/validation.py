@@ -4,9 +4,11 @@ import re
 import zipfile
 from datetime import date
 
+from flask import current_app, has_app_context
 from werkzeug.utils import secure_filename
 
-MAX_FILE_BYTES = 50 * 1024 * 1024
+DEFAULT_MAX_FILE_BYTES = 50 * 1024 * 1024
+MAX_FILE_BYTES = None
 MAX_PERSONAL_BYTES = 16 * 1024
 MAX_ZIP_ENTRIES = 2048
 MAX_ZIP_UNCOMPRESSED_BYTES = 100 * 1024 * 1024
@@ -25,17 +27,26 @@ class ValidationError(ValueError):
 class UploadTooLarge(ValidationError):
     """Ukuran melampaui batas; petakan menjadi HTTP 413."""
 
+def max_file_bytes():
+    if MAX_FILE_BYTES is not None:
+        return MAX_FILE_BYTES
+    if has_app_context():
+        config = current_app.config.get("MAX_CONTENT_LENGTH")
+        if config:
+            return config
+    return DEFAULT_MAX_FILE_BYTES
+
 def detect_content_type(data, extension):
     """Return MIME setelah memeriksa format konten, bukan MIME browser."""
     extension = extension.lower()
     if extension in {"jpg", "jpeg"}:
         if not (data.startswith(b"\xff\xd8\xff")
-                and data.rstrip(b"\x00").endswith(b"\xff\xd9")):
+                and b"\xff\xd9" in data[3:]):
             raise ValidationError("File gambar tidak valid")
         return "image/jpeg"
     elif extension == "png":
         if not (data.startswith(b"\x89PNG\r\n\x1a\n")
-                and data.endswith(b"IEND\xaeB`\x82")):
+                and b"IEND\xaeB`\x82" in data[8:]):
             raise ValidationError("File gambar tidak valid")
         return "image/png"
     elif extension == "pdf":
@@ -99,11 +110,12 @@ def validate_upload(uploaded, kind):
     extension = safe_filename.rsplit(".", 1)[1].lower()
     if extension not in UPLOAD_FORMATS[kind]:
         raise ValidationError("Ekstensi file tidak diizinkan")
-
-    plaintext = uploaded.stream.read(MAX_FILE_BYTES + 1)
+    
+    limit = max_file_bytes()
+    plaintext = uploaded.stream.read(limit + 1)
     if not plaintext:
         raise ValidationError("File kosong")
-    if len(plaintext) > MAX_FILE_BYTES:
+    if len(plaintext) > limit:
         raise UploadTooLarge("Ukuran file melebihi batas")
 
     # Jangan percaya uploaded.content_type; tentukan dari isi file.

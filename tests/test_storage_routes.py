@@ -18,7 +18,7 @@ PAYLOAD = dict(nama='Contoh', nik='0123456789012345', alamat='Alamat', tanggal_l
 
 @pytest.fixture()
 def storage_app(web):
-    """Use the same registered storage routes as the application."""
+    assert "storage" in web.blueprints
     return web
 
 

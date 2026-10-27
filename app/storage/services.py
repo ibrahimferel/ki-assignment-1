@@ -9,7 +9,7 @@ from app.extensions import db
 from app.models import CipherCopy, StoredFile
 from app.storage.disk import read_ciphertext, remove_ciphertext, write_ciphertext
 from app.storage.validation import (
-    MAX_FILE_BYTES,
+    max_file_bytes,
     MAX_PERSONAL_BYTES,
     UPLOAD_FORMATS,
     UploadTooLarge,
@@ -48,7 +48,7 @@ def create_record(*, plaintext, kind, filename, content_type):
         raise ValidationError("Content type tidak valid")
     if not isinstance(plaintext, bytes) or not plaintext:
         raise ValidationError("Data tidak valid")
-    limit = MAX_PERSONAL_BYTES if kind == PERSONAL_KIND else MAX_FILE_BYTES
+    limit = MAX_PERSONAL_BYTES if kind == PERSONAL_KIND else max_file_bytes()
     if len(plaintext) > limit:
         raise UploadTooLarge("Ukuran data melebihi batas")
 
