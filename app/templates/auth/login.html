@@ -1,15 +1,53 @@
 {% extends "base.html" %}
 {% block title %}Log in{% endblock %}
+{% block head %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/register.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/medical-images.css') }}">
+<script src="{{ url_for('static', filename='js/login.js') }}" defer></script>
+{% endblock %}
 {% block content %}
-<h1>Log in</h1>
-{% if error %}
-<p class="error" role="alert">{{ error }}</p>
-{% endif %}
-<form method="post" action="{{ url_for('auth.login', next=next_url) }}">
-  {{ form.hidden_tag() }}
-  <p>{{ form.username.label }} {{ form.username() }}</p>
-  <p>{{ form.password.label }} {{ form.password() }}</p>
-  <p><button type="submit">Log in</button></p>
-</form>
-<p>No account yet? <a href="{{ url_for('auth.register') }}">Register</a></p>
+<div class="auth-frame">
+  <header class="auth-header">
+    <a class="brand" href="{{ url_for('main.index') }}" aria-label="MedVault home">
+      <span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 32 32" fill="none"><path d="M4 17h6l3-7 5 13 3-6h7" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+      <span>medvault<span class="brand-dot">.</span></span>
+    </a>
+    <a class="back-link" href="{{ url_for('main.index') }}"><span aria-hidden="true">&#8592;</span> Back to home</a>
+  </header>
+  <div class="auth-layout">
+    <aside class="auth-visual auth-visual-login" aria-label="About MedVault">
+      <div class="visual-content">
+        <h2>YOUR RECORDS.<br><span>RIGHT WHERE YOU LEFT THEM.</span></h2>
+        <p>Return to your personal details and health documents, all in one place.</p>
+        <div class="visual-note"><span aria-hidden="true">&#10035;</span> YOUR RECORDS, WITHIN REACH</div>
+      </div>
+    </aside>
+    <section class="auth-content" aria-labelledby="login-heading">
+      <div class="auth-card">
+        <span class="tag">YOUR VAULT</span>
+        <h1 id="login-heading">Welcome back<span class="accent">.</span></h1>
+        <p class="intro">Log in to view your personal details and stored files.</p>
+        {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
+        <form method="post" action="{{ url_for('auth.login', next=next_url) }}" id="login-form">
+          {{ form.hidden_tag() }}
+          <div class="field">
+            {{ form.username.label }}
+            {{ form.username(placeholder='Enter your username') }}
+          </div>
+          <div class="field">
+            {{ form.password.label }}
+            <div class="password-control">
+              {{ form.password(placeholder='Enter your password') }}
+              <button class="visibility-toggle" type="button" data-password-target="password" aria-controls="password" aria-label="Show password" aria-pressed="false" hidden>Show</button>
+            </div>
+          </div>
+          <button class="submit-button" type="submit"><span class="submit-label">Log in</span><span aria-hidden="true">&#8599;</span></button>
+          <p class="submit-status" role="status" aria-live="polite"></p>
+        </form>
+        <p class="auth-switch">New to MedVault? <a href="{{ url_for('auth.register') }}">Create an account <span aria-hidden="true">&#8594;</span></a></p>
+      </div>
+    </section>
+  </div>
+  <footer class="auth-footer"><span>PERSONAL RECORDS, THOUGHTFULLY ORGANIZED.</span><span>MEDVAULT</span></footer>
+</div>
 {% endblock %}

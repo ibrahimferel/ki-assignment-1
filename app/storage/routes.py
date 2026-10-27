@@ -81,6 +81,24 @@ def download(file_id, algorithm):
     )
 
 
+@storage_bp.get("/<int:file_id>/comparison")
+@login_required
+def comparison(file_id):
+    stored = get_owned_or_404(StoredFile, file_id)
+    return jsonify(
+        original_size=stored.plaintext_size,
+        copies=[
+            {
+                "algorithm": copy.algorithm,
+                "mode": copy.mode,
+                "encryption_seconds": copy.encrypt_seconds,
+                "encrypted_size": copy.ciphertext_size,
+            }
+            for copy in stored.copies
+        ],
+    )
+
+
 @storage_bp.post("/personal")
 @login_required
 def create_personal():
