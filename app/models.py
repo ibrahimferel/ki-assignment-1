@@ -115,6 +115,7 @@ class StoredFile(db.Model):
     content_type = db.Column(db.String(100), nullable=False)
     plaintext_size = db.Column(db.Integer, nullable=False)
     created_at = db.Column(db.DateTime, nullable=False, default=_utcnow)
+    plaintext_sha256 = db.Column(db.String(64), nullable=False)
 
     owner = db.relationship("User", back_populates="files")
     copies = db.relationship(
@@ -132,7 +133,6 @@ class StoredFile(db.Model):
             "plaintext_size >= 0", name="ck_stored_file_plaintext_size"
         ),
     )
-
 
 class CipherCopy(db.Model):
     __tablename__ = "cipher_copy"
