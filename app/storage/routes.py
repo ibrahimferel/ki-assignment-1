@@ -17,7 +17,8 @@ from app.storage.validation import (
 )
 
 storage_bp = Blueprint("storage", __name__, url_prefix="/storage")
-
+INLINE_TYPES = {"image/jpeg", "image/png"}
+INLINE_CSP = "sandbox; default-src 'none'; img-src 'self'"
 
 @storage_bp.errorhandler(ValidationError)
 def validation_error(error):
@@ -81,6 +82,27 @@ def download(file_id, algorithm):
         download_name=stored.original_filename,
         mimetype="application/octet-stream",
     )
+
+
+@storage_bp.get("/<int:file_id>/view")
+@login_required
+def view(file_id):
+    stored = get_owned_or_404(StoredFile, file_id)   # milik orang lain -> 404
+    if stored.content_type not in INLINE_TYPES:
+        abort(404)
+    try:
+        plaintext = decrypt_record(stored, "AES")     # MAC + hash dicek di sini
+    except FileNotFoundError:
+        abort(404)
+    except (CryptoError, ValueError):
+        return jsonify(error="Data tidak dapat didekripsi"), 422
+    response = send_file(
+        BytesIO(plaintext),
+        mimetype=stored.content_type,   # dari isi file, bukan dari browser
+        as_attachment=False,
+    )
+    response.headers["Content-Security-Policy"] = INLINE_CSP
+    return response
 
 
 @storage_bp.get("/<int:file_id>/comparison")

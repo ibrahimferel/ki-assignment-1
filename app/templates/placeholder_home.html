@@ -26,6 +26,26 @@
     <section class="panel personal" id="personal" aria-labelledby="personal-heading"><span class="tag">YOUR DETAILS</span><h2 id="personal-heading">Personal information<span class="accent">.</span></h2><p>Add your details or choose Edit on a personal record.</p><form id="personal-form"><div class="personal-grid"><div><label for="nama">Full name</label><input id="nama" name="nama" maxlength="100" required></div><div><label for="nik">NIK (16 digits)</label><input id="nik" name="nik" inputmode="numeric" pattern="[0-9]{16}" required></div><div class="wide"><label for="alamat">Address</label><textarea id="alamat" name="alamat" maxlength="1000" required></textarea></div><div><label for="tanggal_lahir">Date of birth</label><input type="date" id="tanggal_lahir" name="tanggal_lahir" required></div></div><div class="form-actions"><button class="primary button" type="submit" id="personal-save">Create record</button><button class="subtle-button" type="button" id="personal-cancel" hidden>Cancel editing</button></div></form></section>
   </div>
   <footer class="container vault-footer">PERSONAL RECORDS, THOUGHTFULLY ORGANIZED.</footer>
-  <dialog id="delete-dialog" aria-labelledby="delete-title"><form method="dialog"><h2 id="delete-title">Delete this record?</h2><p id="delete-description"></p><p>This removes the record and its encrypted copies.</p><p id="delete-error" role="alert"></p><div class="dialog-actions"><button class="subtle-button" value="cancel" id="delete-cancel">Cancel</button><button class="danger-button" type="button" id="delete-confirm">Delete record</button></div></form></dialog>
+  <dialog id="delete-dialog" aria-labelledby="delete-title">
+    <form method="dialog"><h2 id="delete-title">Delete this record?</h2>
+      <p id="delete-description"></p><p>This removes the record and its encrypted copies.</p>
+      <p id="delete-error" role="alert"></p><div class="dialog-actions">
+        <button class="subtle-button" value="cancel" id="delete-cancel">Cancel</button>
+        <button class="danger-button" type="button" id="delete-confirm">Delete record</button>
+      </div></form>
+    </dialog>
+    <dialog id="view-dialog" aria-labelledby="view-title">
+  <h2 id="view-title">Record details</h2>
+  <p id="view-status" role="status"></p>
+  <dl id="view-fields" class="view-fields" hidden>
+    <dt>Full name</dt><dd id="view-nama"></dd>
+    <dt>NIK</dt><dd id="view-nik"></dd>
+    <dt>Address</dt><dd id="view-alamat"></dd>
+    <dt>Date of birth</dt><dd id="view-tanggal_lahir"></dd>
+  </dl>
+  <img id="view-image" class="view-image" alt="" hidden>
+  <p id="view-error" role="alert"></p>
+  <form method="dialog"><button class="subtle-button" id="view-close">Close</button></form>
+</dialog>
 </div>
 {% endblock %}
