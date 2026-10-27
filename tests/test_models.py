@@ -31,9 +31,9 @@ INSERT_USER = (
 )
 INSERT_FILE = (
     "INSERT INTO stored_file (owner_id, kind, original_filename, "
-    "content_type, plaintext_size, created_at) VALUES "
+    "content_type, plaintext_size, plaintext_sha256, created_at) VALUES "
     "(:owner_id, :kind, :original_filename, :content_type, "
-    ":plaintext_size, '2026-01-01 00:00:00')"
+    ":plaintext_size, :plaintext_sha256, '2026-01-01 00:00:00')"
 )
 INSERT_COPY = (
     "INSERT INTO cipher_copy (file_id, algorithm, mode, iv, wrapped_key, "
@@ -56,6 +56,7 @@ def file_row(owner_id, **changes):
         "original_filename": "a.pdf",
         "content_type": "application/pdf",
         "plaintext_size": 1,
+        "plaintext_sha256": "0" * 64,
     }
     row.update(changes)
     return row
@@ -198,6 +199,7 @@ EXPECTED_COLUMNS = {
         "content_type": ("VARCHAR(100)", False),
         "plaintext_size": ("INTEGER", False),
         "created_at": ("DATETIME", False),
+        "plaintext_sha256": ("VARCHAR(64)", False),
     },
     "cipher_copy": {
         "id": ("INTEGER", False),
@@ -434,6 +436,7 @@ def test_a_file_without_an_owner_can_not_be_committed(app):
             original_filename="a",
             content_type="x",
             plaintext_size=1,
+            plaintext_sha256="0" * 64,
         )
     )
     with pytest.raises(IntegrityError):

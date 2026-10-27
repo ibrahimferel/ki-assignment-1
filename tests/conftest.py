@@ -88,6 +88,7 @@ def make_file(app):
             original_filename=filename,
             content_type="application/pdf",
             plaintext_size=123,
+            plaintext_sha256="0" * 64,
         )
         for algorithm, mode, iv in (
             ("AES", "CBC", b"\x01" * 16),

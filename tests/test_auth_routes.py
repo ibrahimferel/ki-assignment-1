@@ -136,6 +136,13 @@ def test_the_route_table_is_exactly_the_documented_one(site):
         ("/auth/login", ("GET", "POST")),
         ("/auth/register", ("GET", "POST")),
         ("/auth/logout", ("POST",)),
+        ("/storage/", ("GET",)),
+        ("/storage/upload", ("POST",)),
+        ("/storage/personal", ("POST",)),
+        ("/storage/<int:file_id>/download/<algorithm>", ("GET",)),
+        ("/storage/<int:file_id>/personal", ("GET",)),
+        ("/storage/<int:file_id>/personal/update", ("POST",)),
+        ("/storage/<int:file_id>/delete", ("POST",)),
     }
 
 

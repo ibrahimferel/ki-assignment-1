@@ -47,6 +47,7 @@ def make_file(owner_name, name="report.pdf", copies=("AES", "DES", "RC4")):
         original_filename=name,
         content_type="application/pdf",
         plaintext_size=10,
+        plaintext_sha256="0" * 64,
     )
     for algorithm in copies:
         block = algorithm != "RC4"
@@ -97,6 +98,7 @@ def site(web):
             original_filename=request.form["name"],
             content_type="text/plain",
             plaintext_size=1,
+            plaintext_sha256="0" * 64,
         )
         db.session.add(stored)
         db.session.commit()
@@ -382,6 +384,7 @@ def add_file_with_id(site, owner_name, file_id):
                 original_filename=f"id-{file_id}.pdf",
                 content_type="text/plain",
                 plaintext_size=1,
+                plaintext_sha256="0" * 64,
             )
         )
         db.session.commit()

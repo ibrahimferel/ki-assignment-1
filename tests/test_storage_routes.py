@@ -18,9 +18,7 @@ PAYLOAD = dict(nama='Contoh', nik='0123456789012345', alamat='Alamat', tanggal_l
 
 @pytest.fixture()
 def storage_app(web):
-    """Daftarkan storage hanya pada aplikasi tes, tanpa mengubah core."""
-    from app.storage.routes import storage_bp
-    web.register_blueprint(storage_bp)
+    assert "storage" in web.blueprints
     return web
 
 

@@ -811,8 +811,13 @@ FAILURES = [
     ("ali\x00ce", GOOD, "dummy"),
 ]
 
+def _short_id(value):
+    if isinstance(value, str) and len(value) > 40:
+        return f"{value[:5]}...len{len(value)}"
+    return None
 
-@pytest.mark.parametrize(("username", "password", "target"), FAILURES)
+    
+@pytest.mark.parametrize(("username", "password", "target"), FAILURES, ids=_short_id)
 def test_every_failure_returns_none_after_one_verification(
     alice, hasher, username, password, target
 ):

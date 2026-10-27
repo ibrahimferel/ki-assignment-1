@@ -3,6 +3,7 @@ from io import BytesIO
 
 from flask import Blueprint, abort, jsonify, request, send_file
 from flask_login import login_required
+from werkzeug.exceptions import RequestEntityTooLarge
 
 from app.authz import get_owned_or_404, owned_select
 from app.crypto import CryptoError
@@ -24,6 +25,7 @@ def validation_error(error):
 
 
 @storage_bp.errorhandler(UploadTooLarge)
+@storage_bp.errorhandler(RequestEntityTooLarge)
 def upload_too_large(error):
     return jsonify(error="Ukuran file melebihi batas"), 413
 
