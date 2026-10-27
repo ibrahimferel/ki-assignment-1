@@ -140,6 +140,7 @@ def test_the_route_table_is_exactly_the_documented_one(site):
         ("/storage/upload", ("POST",)),
         ("/storage/personal", ("POST",)),
         ("/storage/<int:file_id>/download/<algorithm>", ("GET",)),
+        ("/storage/<int:file_id>/comparison", ("GET",)),
         ("/storage/<int:file_id>/personal", ("GET",)),
         ("/storage/<int:file_id>/personal/update", ("POST",)),
         ("/storage/<int:file_id>/delete", ("POST",)),
@@ -186,7 +187,13 @@ def test_pages_never_load_anything_from_outside(browser):
     for url in ("/auth/login", "/auth/register", "/"):
         html = text_of(browser.get(url))
         assert "http://" not in html and "https://" not in html
-        assert "<script" not in html.lower()
+        scripts = re.findall(r"<script\b[^>]*>.*?</script>", html, re.I | re.S)
+        allowed = {
+            "/": ['<script src="/static/js/landing.js" defer></script>'],
+            "/auth/register": ['<script src="/static/js/register.js" defer></script>'],
+            "/auth/login": ['<script src="/static/js/login.js" defer></script>'],
+        }
+        assert scripts == allowed[url]
 
 
 def test_page_titles_and_cross_links(browser):

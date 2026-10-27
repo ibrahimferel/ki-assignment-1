@@ -1,0 +1,8 @@
+.project-credits { min-width: 0; max-width: 340px; }
+.project-credits h2 { margin: 0; color: #f4f7f7; font-size: 13px; line-height: 1.4; letter-spacing: 0; }
+.project-credits p { margin: 4px 0 12px; color: #8fe9da; font-size: 12px; font-weight: 700; }
+.project-credits table { width: 100%; border-collapse: collapse; font-size: 12px; color: #c4d0cf; }
+.project-credits th { color: #aabbb9; text-align: left; font-size: 10px; letter-spacing: .08em; text-transform: uppercase; }
+.project-credits th, .project-credits td { padding: 4px 12px 4px 0; vertical-align: top; }
+.project-credits td:last-child { white-space: nowrap; font-variant-numeric: tabular-nums; }
+@media (max-width: 767px) { .project-credits { margin-top: 32px; } }

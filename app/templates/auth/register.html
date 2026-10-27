@@ -1,34 +1,66 @@
 {% extends "base.html" %}
 {% block title %}Register{% endblock %}
+{% block head %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/register.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/medical-images.css') }}">
+<script src="{{ url_for('static', filename='js/register.js') }}" defer></script>
+{% endblock %}
 {% block content %}
-<h1>Register</h1>
-{% if error %}
-<p class="error" role="alert">{{ error }}</p>
-{% endif %}
-<form method="post" action="{{ url_for('auth.register') }}">
-  {{ form.hidden_tag() }}
-  <p>{{ form.username.label }} {{ form.username() }}</p>
-  <p class="hint">
-    {{ limits.username_min }} to {{ limits.username_max }} characters: letters
-    a-z, digits, ".", "_" and "-"; it must start and end with a letter or
-    a digit.
-  </p>
-  {% for message in form.username.errors %}
-  <p class="error" role="alert">{{ message }}</p>
-  {% endfor %}
-  <p>{{ form.password.label }} {{ form.password() }}</p>
-  <p class="hint">
-    {{ limits.password_min }} to {{ limits.password_max }} characters. A long
-    sentence works well.
-  </p>
-  {% for message in form.password.errors %}
-  <p class="error" role="alert">{{ message }}</p>
-  {% endfor %}
-  <p>{{ form.confirm.label }} {{ form.confirm() }}</p>
-  {% for message in form.confirm.errors %}
-  <p class="error" role="alert">{{ message }}</p>
-  {% endfor %}
-  <p><button type="submit">Create account</button></p>
-</form>
-<p>Already registered? <a href="{{ url_for('auth.login') }}">Log in</a></p>
+<div class="auth-frame">
+  <header class="auth-header">
+    <a class="brand" href="{{ url_for('main.index') }}" aria-label="MedVault home">
+      <span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 32 32" fill="none"><path d="M4 17h6l3-7 5 13 3-6h7" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+      <span>medvault<span class="brand-dot">.</span></span>
+    </a>
+    <a class="back-link" href="{{ url_for('main.index') }}"><span aria-hidden="true">&#8592;</span> Back to home</a>
+  </header>
+  <div class="auth-layout">
+    <aside class="auth-visual auth-visual-register" aria-label="About MedVault">
+      <div class="visual-content">
+        <h2>A LITTLE MORE<br><span>PEACE OF MIND.</span></h2>
+        <p>A place for the details and documents that matter to you.</p>
+        <div class="visual-note"><span aria-hidden="true">&#10035;</span> YOUR RECORDS, WITHIN REACH</div>
+      </div>
+    </aside>
+    <section class="auth-content" aria-labelledby="register-heading">
+      <div class="auth-card">
+        <span class="tag">GET STARTED</span>
+        <h1 id="register-heading">Create your vault<span class="accent">.</span></h1>
+        <p class="intro">Create an account to keep your personal details and health documents together.</p>
+        {% if error %}<p class="error" role="alert">{{ error }}</p>
+        {% elif form.errors %}<p class="form-alert" role="alert">Please check the details below and try again.</p>{% endif %}
+        <form method="post" action="{{ url_for('auth.register') }}" id="register-form">
+          {{ form.hidden_tag() }}
+          <div class="field">
+            {{ form.username.label }}
+            {{ form.username(placeholder='Choose a username', aria_describedby='username-hint' ~ (' username-errors' if form.username.errors else ''), aria_invalid='true' if form.username.errors else 'false') }}
+            <p class="hint" id="username-hint">{{ limits.username_min }} to {{ limits.username_max }} characters: letters a-z, digits, ".", "_" and "-"; it must start and end with a letter or a digit.</p>
+            {% for message in form.username.errors %}<p class="error" id="username-errors">{{ message }}</p>{% endfor %}
+          </div>
+          <div class="field">
+            {{ form.password.label }}
+            <div class="password-control">
+              {{ form.password(placeholder='Create a password', aria_describedby='password-hint' ~ (' password-errors' if form.password.errors else ''), aria_invalid='true' if form.password.errors else 'false') }}
+              <button class="visibility-toggle" type="button" data-password-target="password" aria-controls="password" aria-label="Show password" aria-pressed="false" hidden>Show</button>
+            </div>
+            <p class="hint" id="password-hint">{{ limits.password_min }} to {{ limits.password_max }} characters. A long sentence works well.</p>
+            {% for message in form.password.errors %}<p class="error" id="password-errors">{{ message }}</p>{% endfor %}
+          </div>
+          <div class="field">
+            {{ form.confirm.label }}
+            <div class="password-control">
+              {{ form.confirm(placeholder='Repeat your password', aria_describedby='confirm-errors' if form.confirm.errors else false, aria_invalid='true' if form.confirm.errors else 'false') }}
+              <button class="visibility-toggle" type="button" data-password-target="confirm" aria-controls="confirm" aria-label="Show repeated password" aria-pressed="false" hidden>Show</button>
+            </div>
+            {% for message in form.confirm.errors %}<p class="error" id="confirm-errors">{{ message }}</p>{% endfor %}
+          </div>
+          <button class="submit-button" type="submit"><span class="submit-label">Create account</span><span aria-hidden="true">&#8599;</span></button>
+          <p class="submit-status" role="status" aria-live="polite"></p>
+        </form>
+        <p class="auth-switch">Already have an account? <a href="{{ url_for('auth.login') }}">Log in <span aria-hidden="true">&#8594;</span></a></p>
+      </div>
+    </section>
+  </div>
+  <footer class="auth-footer"><span>PERSONAL RECORDS, THOUGHTFULLY ORGANIZED.</span><span>MEDVAULT</span></footer>
+</div>
 {% endblock %}

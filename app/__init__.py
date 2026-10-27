@@ -78,6 +78,7 @@ def create_app(config_object: Optional[object] = None) -> Flask:
     from app.auth.routes import auth_bp
     from app.auth.throttle import Throttle
     from app.placeholder import main_bp
+    from app.storage.routes import storage_bp
     from app.request_limits import register_auth_body_limit
     from app.security_headers import register_security_headers
     from app.storage.routes import storage_bp

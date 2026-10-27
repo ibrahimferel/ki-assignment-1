@@ -87,7 +87,7 @@ def test_personal_crud(storage_web):
     assert alice.get(f'/storage/{record_id}/personal').status_code == 404
 
 
-@pytest.mark.parametrize('operation', ['personal', 'download/AES', 'personal/update', 'delete'])
+@pytest.mark.parametrize('operation', ['personal', 'download/AES', 'comparison', 'personal/update', 'delete'])
 def test_other_user_cannot_access_owned_object(storage_web, operation):
     _, alice, bobby = storage_web
     record_id = post(alice, '/storage/personal', json=PAYLOAD).json['id']
@@ -108,6 +108,25 @@ def test_list_is_private(storage_web):
     ids = [post(c, '/storage/personal', json=PAYLOAD).json['id'] for c in [alice, bobby]]
     for client, record_id in zip([alice, bobby], ids):
         assert [item['id'] for item in client.get('/storage/').json['items']] == [record_id]
+
+
+def test_comparison_returns_only_owned_persisted_measurements(storage_web):
+    web, alice, _ = storage_web
+    content = b'%PDF-1.4\n%%EOF'
+    record_id = post(alice, '/storage/upload', data={
+        'kind': 'document', 'file': (io.BytesIO(content), 'sample.pdf'),
+    }).json['id']
+    response = alice.get(f'/storage/{record_id}/comparison')
+    assert response.status_code == 200
+    assert response.headers['Cache-Control'] == 'no-store'
+    assert response.json['original_size'] == len(content)
+    with web.app_context():
+        copies = db.session.get(StoredFile, record_id).copies
+        expected = {c.algorithm: (c.mode, c.encrypt_seconds, c.ciphertext_size) for c in copies}
+    assert {c['algorithm'] for c in response.json['copies']} == {'AES', 'DES', 'RC4'}
+    for copy in response.json['copies']:
+        assert set(copy) == {'algorithm', 'mode', 'encryption_seconds', 'encrypted_size'}
+        assert (copy['mode'], copy['encryption_seconds'], copy['encrypted_size']) == expected[copy['algorithm']]
 
 
 def test_anonymous_requires_login(storage_app):

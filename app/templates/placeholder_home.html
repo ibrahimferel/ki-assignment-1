@@ -1,17 +1,31 @@
 {% extends "base.html" %}
-{% block title %}Home{% endblock %}
+{% block title %}Your vault{% endblock %}
+{% block head %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/storage.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/storage-refinements.css') }}">
+<script src="{{ url_for('static', filename='js/storage.js') }}" defer></script>
+{% endblock %}
 {% block content %}
-<h1>Home (temporary placeholder)</h1>
-{% if current_user.is_authenticated %}
-<p>Logged in as {{ current_user.username }}.</p>
-<form method="post" action="{{ url_for('auth.logout') }}">
-  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-  <button type="submit">Log out</button>
-</form>
-{% else %}
-<p>
-  <a href="{{ url_for('auth.login') }}">Log in</a> or
-  <a href="{{ url_for('auth.register') }}">Register</a>
-</p>
-{% endif %}
+<div class="vault-frame" id="vault" data-index-url="{{ url_for('storage.index') }}" data-upload-url="{{ url_for('storage.upload') }}" data-personal-url="{{ url_for('storage.create_personal') }}" data-max-request="{{ config.MAX_CONTENT_LENGTH }}">
+  <header class="vault-header container">
+    <a class="brand" href="{{ url_for('main.index') }}"><span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 32 32" fill="none"><path d="M4 17h6l3-7 5 13 3-6h7" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"/></svg></span><span>medvault<span class="accent">.</span></span></a>
+    <nav aria-label="Your vault"><a href="#upload">Upload</a><a href="#records-section">Your records</a><a href="#personal">Personal data</a></nav>
+    <form method="post" action="{{ url_for('auth.logout') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="logout" type="submit">Log out <span aria-hidden="true">&#8599;</span></button></form>
+  </header>
+  <div class="container vault-content">
+    <div class="welcome"><div><h1>Your records<span class="accent">.</span></h1><p>Keep your personal details and important files together.</p><p class="signed-in">Logged in as {{ current_user.username }}.</p></div><a class="primary button" href="#upload">Upload a file <span aria-hidden="true">&#8599;</span></a></div>
+    <p id="storage-message" class="notice" role="status" aria-live="polite" hidden></p>
+    <div class="overview" aria-label="Vault overview"><div class="overview-card"><span>YOUR FILES</span><strong id="file-count">&mdash;</strong><small>Identity scans, documents and videos</small></div><div class="overview-card"><span>PERSONAL RECORDS</span><strong id="personal-count">&mdash;</strong><small>Saved details</small></div><div class="overview-card"><span>ORIGINAL DATA SIZE</span><strong id="total-size">&mdash;</strong><small>Before encryption</small></div></div>
+    <div class="workspace-grid">
+      <section class="panel upload-panel" id="upload" aria-labelledby="upload-heading"><span class="tag">ADD TO YOUR VAULT</span><h2 id="upload-heading">Upload a file<span class="accent">.</span></h2><p>Choose a category and a file to add to your records.</p>
+        <form id="upload-form" enctype="multipart/form-data"><label for="kind">File category</label><select name="kind" id="kind" required><option value="id_card">Identity scan</option><option value="document">Medical document</option><option value="video">Symptom video</option></select><p class="field-hint" id="format-hint">JPG, JPEG or PNG</p><label class="file-picker" for="file"><span aria-hidden="true">&#8593;</span><strong>Choose a file</strong><small id="file-name">No file selected</small></label><input class="file-input" type="file" id="file" name="file" accept=".jpg,.jpeg,.png" required aria-describedby="format-hint upload-limit"><p class="field-hint" id="upload-limit">One file per upload. Request limit: {{ (config.MAX_CONTENT_LENGTH / 1048576)|round(2) }} MiB including form overhead. Individual files are capped at 50 MiB.</p><button class="primary button full" type="submit" id="upload-button">Upload file <span aria-hidden="true">&#8599;</span></button><p id="upload-status" class="field-hint" role="status" aria-live="polite"></p></form>
+      </section>
+      <section class="panel records-panel" id="records-section" aria-labelledby="records-heading"><div class="panel-heading"><div><span class="tag">YOUR VAULT</span><h2 id="records-heading">Your records<span class="accent">.</span></h2><p>Your files and personal information, in one place.</p></div><button class="subtle-button" type="button" id="refresh-records">Refresh</button></div><div class="filter-row"><label for="record-filter">Show</label><select id="record-filter"><option value="all">All records</option><option value="id_card">Identity scans</option><option value="document">Medical documents</option><option value="video">Symptom videos</option><option value="personal_data">Personal data</option></select></div><p id="records-status" class="field-hint" role="status">Loading records...</p><ul id="records" class="record-list"></ul><nav id="records-pagination" class="records-pagination" aria-label="Record pages" hidden><button class="subtle-button" type="button" id="records-previous">Previous</button><span id="records-page" aria-live="polite"></span><button class="subtle-button" type="button" id="records-next">Next</button></nav></section>
+    </div>
+    <section class="panel comparison" id="comparison" aria-labelledby="comparison-heading"><h2 id="comparison-heading">Compare encryption methods<span class="accent">.</span></h2><p id="comparison-intro">For an optional look at one record, select <strong>Compare methods</strong> beside it. You can download the original directly from your records.</p><p id="comparison-status" class="field-hint" role="status" aria-live="polite"></p><div id="comparison-result" hidden><div class="comparison-file"><span>SELECTED RECORD</span><strong id="comparison-name"></strong><small id="comparison-original"></small></div><div class="table-scroll"><table><thead><tr><th scope="col">Algorithm</th><th scope="col">Mode</th><th scope="col">Encryption time</th><th scope="col">Encrypted size</th><th scope="col">Storage overhead</th><th scope="col">Recover original</th></tr></thead><tbody id="comparison-rows"></tbody></table></div><p class="explanation">Time measures only the cipher operation, including padding where used; it does not include the complete upload, key generation, authentication tag, or file storage. Encrypted size includes ciphertext and its authentication tag, but excludes database metadata, IVs, and wrapped keys. Overhead = encrypted size minus original size; percentage = overhead divided by original size.</p><p class="explanation">These are measurements from one record, not a complete benchmark. DES and RC4 are included for educational comparison; speed alone does not establish security.</p></div></section>
+    <section class="panel personal" id="personal" aria-labelledby="personal-heading"><span class="tag">YOUR DETAILS</span><h2 id="personal-heading">Personal information<span class="accent">.</span></h2><p>Add your details or choose Edit on a personal record.</p><form id="personal-form"><div class="personal-grid"><div><label for="nama">Full name</label><input id="nama" name="nama" maxlength="100" required></div><div><label for="nik">NIK (16 digits)</label><input id="nik" name="nik" inputmode="numeric" pattern="[0-9]{16}" required></div><div class="wide"><label for="alamat">Address</label><textarea id="alamat" name="alamat" maxlength="1000" required></textarea></div><div><label for="tanggal_lahir">Date of birth</label><input type="date" id="tanggal_lahir" name="tanggal_lahir" required></div></div><div class="form-actions"><button class="primary button" type="submit" id="personal-save">Create record</button><button class="subtle-button" type="button" id="personal-cancel" hidden>Cancel editing</button></div></form></section>
+  </div>
+  <footer class="container vault-footer">PERSONAL RECORDS, THOUGHTFULLY ORGANIZED.</footer>
+  <dialog id="delete-dialog" aria-labelledby="delete-title"><form method="dialog"><h2 id="delete-title">Delete this record?</h2><p id="delete-description"></p><p>This removes the record and its encrypted copies.</p><p id="delete-error" role="alert"></p><div class="dialog-actions"><button class="subtle-button" value="cancel" id="delete-cancel">Cancel</button><button class="danger-button" type="button" id="delete-confirm">Delete record</button></div></form></dialog>
+</div>
 {% endblock %}
