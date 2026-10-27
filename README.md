@@ -203,6 +203,6 @@ diuji).
 | Anggota | Bagian |
 | --- | --- |
 | Anggota 1 | Backend, autentikasi, dan basis data (branch ini) |
-| Anggota 2 | diisi tim |
+| Anggota 2 | Algoritma Enkripsi dan Deskripsi serta mekanisme key |
 | Anggota 3 | diisi tim |
 | Anggota 4 | diisi tim |
