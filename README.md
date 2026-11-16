@@ -94,8 +94,38 @@ be opened again.
 python init_db.py
 ```
 
-Creates the `user`, `stored_file` and `cipher_copy` tables and the storage folder.
-Safe to rerun: existing data is not modified.
+Creates the tables (`user`, `stored_file`, `cipher_copy`, and for key sharing
+`user_key`, `access_request`, `shared_copy`) and the storage folder. Safe to
+rerun: it only creates what is missing and never changes existing tables or
+data. After pulling Assignment 2, run it again: the three new tables are added
+and your existing data stays as it is (there is no need to delete
+`instance/app.db`).
+
+## Key sharing tables (Assignment 2)
+
+The three key sharing tables are described in full in `docs/sharing-design.md`
+(the table contract and the access helpers).
+
+| Table | Holds | Key material |
+| --- | --- | --- |
+| `user_key` | one row per user: the public key and the private key | public key (PEM); the private key is designed to be stored encrypted with the user's own password |
+| `access_request` | a request from one user for another user's data, with its status (`pending`, `approved`, `rejected`) | wrapped share key and key package; empty until a request is approved |
+| `shared_copy` | one extra encrypted copy of a file for one request | nonce; the ciphertext itself is a file on disk, not in the database |
+
+Rules the database enforces:
+
+- A requester can have only one `pending` request per owner.
+- A user cannot request their own data.
+- `status` can only be `pending`, `approved` or `rejected`.
+- Deleting a user, a file or a request removes the rows that depend on it. The
+  ciphertext files on disk are not removed by this.
+
+`app/authz.py` also has the requester-side helpers `get_requested_or_404` and
+`requested_select`. They check who made the request, not its status.
+
+Current status: only the tables, their rules and these helpers exist. No code
+creates key pairs, requests or shared copies yet, and there are no sharing
+routes or pages; those are planned.
 
 ## Running
 
@@ -130,11 +160,12 @@ tests passed. Style check (optional, not in `requirements.txt`):
 app/
   __init__.py          application factory (create_app), Flask-Login, CSRF, session cookie
   config.py            reading and validating .env (ConfigError if invalid)
-  models.py            User, StoredFile, CipherCopy
+  models.py            User, StoredFile, CipherCopy, UserKey, AccessRequest, SharedCopy
   database.py          creating tables and the storage folder (init_db)
   db_pragmas.py        PRAGMA foreign_keys on every SQLite connection
   extensions.py        SQLAlchemy db object
-  authz.py             get_owned_or_404, owned_select (data ownership)
+  authz.py             get_owned_or_404, owned_select (data ownership);
+                       get_requested_or_404, requested_select (requester side)
   security_headers.py  security headers, CSP, Cache-Control
   request_limits.py    16 KiB body limit for /auth/*
   placeholder.py       placeholder page "/"
@@ -143,6 +174,7 @@ app/
 docs/
   auth-integration.md  guide for other members (protecting routes, CSRF, uploads, CSP)
   data-model.md        data model design and explanation
+  sharing-design.md    key sharing tables and access helpers (Assignment 2)
 tests/                 automated tests (pytest)
 init_db.py             creates the tables and the storage folder
 run.py                 development server entry point
@@ -210,8 +242,9 @@ yet).
 13. Usernames are ASCII only, and the common-password list is small. [T]
 14. The application does not keep an audit log (no log of failed logins or
     429s). [K]
-15. The schema is created with `create_all()` without migrations; changing the
-    schema means recreating the database. [K]
+15. The schema is created with `create_all()` without migrations. Adding a new
+    table needs no reset (`init_db.py` creates what is missing); changing the
+    columns of an existing table means recreating the database. [K]
 16. Design: DES and RC4 are weak; all three copies contain the same plaintext,
     so data confidentiality is only as strong as the weakest copy; whoever holds
     `.env` and the database can open all data. The encryption module is not yet

@@ -8,6 +8,10 @@ enkripsi, layanan unggah/unduh, dan penyimpanan ciphertext belum ada**: bagian
 untuk Anggota 2 dan 3. Cara memakai bagian yang sudah ada: lihat
 `docs/auth-integration.md`.
 
+Tabel Assignment 2 (`user_key`, `access_request`, `shared_copy`) dan
+kontraknya ada di `docs/sharing-design.md`; dokumen ini tetap membahas tiga
+tabel Assignment 1.
+
 Penulis: Anggota 1 (Backend, Autentikasi, dan Basis Data).
 Dibaca oleh: Anggota 2 (kriptografi) dan Anggota 3 (penyimpanan/unggah).
 
@@ -34,7 +38,10 @@ user 1 ------< stored_file 1 ------< cipher_copy
 
 - Satu pengguna punya banyak data.
 - Satu data punya tepat tiga salinan (AES, DES, RC4).
-- Database hanya menyimpan metadata dan kunci yang sudah dibungkus.
+- Database hanya menyimpan metadata dan kunci dalam bentuk terlindungi: kunci
+  salinan dibungkus master key, kolom private key di `user_key` dirancang
+  memuat private key yang dienkripsi dengan password pengguna, dan kunci
+  publik memang publik. Tidak ada kunci mentah.
   **Isi data (plaintext maupun ciphertext) tidak disimpan di database.**
   Ciphertext disimpan sebagai file di `instance/storage/`.
 
@@ -61,9 +68,13 @@ Nilai `kind` (daftar tertutup): `personal_data`, `id_card`, `document`,
 | `password_hash` | string(255) | NOT NULL; hanya hash, tidak pernah password |
 | `created_at` | datetime (UTC) | NOT NULL, diisi aplikasi |
 
-Tidak ada kolom kunci di `user`. Itu konsekuensi pilihan K3: kunci tidak
-bergantung pada password, sehingga ganti atau lupa password tidak membuat
-data hilang.
+Tidak ada kolom kunci di `user`; pasangan kunci pengguna ada di tabel
+terpisah `user_key` (lihat `docs/sharing-design.md`). Untuk data Assignment 1
+(K3), kunci tidak bergantung pada password, sehingga ganti atau lupa password
+tidak membuat data itu hilang. Pengecualian (rancangan): private key di
+`user_key` dirancang dienkripsi dengan password pengguna, jadi lupa password
+berarti private key itu tidak bisa dibuka lagi (belum ada fitur ganti atau
+reset password).
 
 ### 3.1 Catatan username dan password
 
@@ -260,8 +271,10 @@ sendiri yang lebih kecil, 16 KiB (lihat `docs/auth-integration.md`).
 - Metadata (`original_filename`, `kind`, ukuran, waktu) tersimpan plaintext.
 - Tiga salinan memakan sekitar tiga kali ruang disk dan waktu enkripsi.
 - Validasi `MASTER_KEY` memeriksa format dan panjang, bukan keacakan.
-- Skema dibuat lewat `create_all()` tanpa migrasi. Mengubah skema selama
-  pengembangan berarti menghapus `instance/app.db` dan menginisialisasi
+- Skema dibuat lewat `create_all()` tanpa migrasi. Menambah tabel baru tidak
+  perlu menghapus apa pun (`init_db.py` hanya membuat tabel yang belum ada,
+  seperti saat tiga tabel Assignment 2 ditambahkan). Mengubah kolom tabel
+  yang sudah ada berarti menghapus `instance/app.db` dan menginisialisasi
   ulang; data uji hilang.
 - Id bilangan bulat berurutan dapat ditebak; perlindungannya adalah
   pemeriksaan `owner_id` (I5), bukan kerahasiaan id.
