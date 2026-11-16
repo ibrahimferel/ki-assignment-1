@@ -1,11 +1,11 @@
 # Sharing design (Assignment 2: key management)
 
-Status: **short version, updated in M1-CP5**. The three tables below
+Status: **short version, updated in M1-CP6**. The three tables below
 (M1-CP2), the two requester-side access helpers in section 6.1 (M1-CP3), the
 key pair made at registration (section 6.3, M1-CP4) and the key pair made at
-login for old accounts (section 6.5, M1-CP5) are implemented and tested.
-Items marked *planned* are agreed but not implemented yet; this file is
-completed in M1-CP7.
+login for old accounts (section 6.5, M1-CP5) and the shared test fixtures
+(section 6.6, M1-CP6) are implemented and tested. This file is completed in
+M1-CP7.
 
 Author: Member 1 (Backend and Database). Read by: Members 2, 3 and 4.
 
@@ -153,7 +153,7 @@ lookups by `request_id`. `storage_name` must match the same pattern as
   `BEGIN ENCRYPTED PRIVATE KEY`, so searching for "PRIVATE KEY" alone matches
   it too.
 
-## 6. Access helpers and planned work
+## 6. Access helpers, key pairs and test support
 
 ### 6.1 Implemented in M1-CP3: `app/authz.py`
 
@@ -278,7 +278,7 @@ pairs; the fourth gets the same key pair as the first.** Every private key is
 still encrypted for real with its own user's password. A test that needs a
 freshly generated key asks for the `real_keygen` fixture. Tests that check
 "a third user can not use A's package" must keep their users within the first
-three of the test (the shared fixtures A, B and C of M1-CP6 will).
+three of the test (the shared fixtures A, B and C of section 6.6 do).
 
 ### 6.5 Implemented in M1-CP5: the key pair at login (`ensure_user_key`)
 
@@ -333,10 +333,79 @@ when the user types the password again, for example at unlock.
 **No change-password feature exists.** If one is added, the private key in
 `user_key` must be re-encrypted with the new password in the same change.
 
-### 6.6 Planned (not implemented yet)
+### 6.6 Implemented in M1-CP6: shared test fixtures (A, B, C)
 
-- Shared test fixtures for a requester (A), an owner (B) and a third user (C),
-  each with a valid `user_key` (M1-CP6).
+The fixtures live in `tests/sharing_fixtures.py`; `tests/conftest.py` only
+imports them (one block), so Members 2 and 3 can add their own fixtures to
+conftest.py without a merge conflict. All data is synthetic.
+
+| Fixture | What it gives you |
+| --- | --- |
+| `trio` | three saved users with a valid `user_key`: `trio.a` (requester), `trio.b` (owner of data), `trio.c` (third user). Goes with the `app` fixture (an application context is open) |
+| `web_trio` | the same users for tests with a client. Goes with the `web` fixture (no context is open) |
+| `owner_records` / `web_owner_records` | five records of B (below), made by `create_record` with real ciphertext files |
+| `make_request` | `make_request(requester, owner, status="pending", reason=...)` saves one `access_request` row. The arguments may be a `Party`, a `User` or an id. Nothing else is set (no key package, no wrapped key, no decision time). It needs an open application context |
+| `login_as` | `login_as(client, party)` logs a test client in through the real login page and checks for the 302 |
+| `make_trio` | the builder itself, for a test that wants to create the users later |
+
+```python
+def test_owner_sees_the_request(trio, make_request):
+    request = make_request(trio.a, trio.b)           # A asks B
+    assert trio.b.user.requests_received == [request]
+
+def test_a_client_for_each_user(web, web_trio, login_as):
+    client = web.test_client()
+    login_as(client, web_trio.b)                     # real route, real session
+```
+
+Each user is a `Party` (frozen plain data): `id`, `username`, `password`, and
+`.user` (the `User` row in the current session, so it needs an open context).
+The three passwords are constants that only the tests know, so a test can open
+a private key with `party.password`. They are test values, not secrets, but
+they are hidden from `repr` so that they do not show up in a failure report.
+Read them from the `Party`; never copy them into logs or messages.
+
+B's records, in this order, with the three copies (AES, DES, RC4) of each on
+disk:
+
+| `owner_records.` | kind | file | data |
+| --- | --- | --- | --- |
+| `personal` | `personal_data` | `personal-data.json` | fake personal data |
+| `id_card_png` | `id_card` | `id-card.png` | minimal PNG |
+| `id_card_jpg` | `id_card` | `photo.jpg` | minimal JPEG (an image is an `id_card` in this app) |
+| `document` | `document` | `document.pdf` | minimal PDF |
+| `video` | `video` | `clip.mp4` | minimal MP4 header |
+
+Each `Record` has `id`, `kind`, `filename`, `content_type`, `plaintext`,
+`sha256` and `storage_names`. The bytes pass the upload checks. The 15
+ciphertext files are under pytest's `tmp_path` (`STORAGE_DIR`), which pytest
+removes; no clean-up code is needed and nothing is written to `instance/`.
+
+**Rules for using them without changing them**
+
+1. **Hasher.** The three users are made with a cheap Argon2 setting
+   (`m=8, t=1, p=1`) so that a test does not wait for the real one; the real
+   hasher is put back afterwards, even if the builder fails. The real hasher
+   still verifies these hashes, because Argon2 reads its settings from the hash
+   string. Nothing re-hashes a password at login today. If code ever starts
+   to do so, a test that depends on the hash cost must build its own user.
+2. **Ask for `trio` before anything else that creates users.** The key pool
+   (section 6.4) hands out three different keys in turn. `trio` uses all
+   three, in the order A, B, C, so A, B and C always differ from each other.
+   Any other user made in the same test repeats the key pair of one of them: a
+   user made after the trio gets the key pair of A, and one made before it
+   shares a key pair with one of the three. A test that needs a fourth,
+   different key pair asks for `real_keygen`.
+3. **`trio` for services and helpers, `web_trio` for routes.** `trio` keeps one
+   application context open for the whole test, so Flask-Login would remember
+   the first user of all requests. A test with a client uses `web_trio` and
+   gets one client per user.
+4. **Do not edit `tests/sharing_fixtures.py`.** If you need something else (a
+   `shared_copy` row, an approved request with a key package), write your own
+   fixture in conftest.py or in your test file. There is no `make_shared_copy`
+   on purpose: how a shared copy is made belongs to Members 2 and 3.
+5. **Disk.** `owner_records` and `web_owner_records` write files; `trio` and
+   `make_request` only write rows.
 
 ## 7. Out of scope
 
