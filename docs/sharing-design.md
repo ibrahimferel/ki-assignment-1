@@ -1,10 +1,11 @@
 # Sharing design (Assignment 2: key management)
 
-Status: **short version, updated in M1-CP4**. The three tables below
-(M1-CP2), the two requester-side access helpers in section 6.1 (M1-CP3) and
-the key pair made at registration (section 6.3, M1-CP4) are implemented and
-tested. Items marked *planned* are agreed but not implemented yet; this file
-is completed in M1-CP7.
+Status: **short version, updated in M1-CP5**. The three tables below
+(M1-CP2), the two requester-side access helpers in section 6.1 (M1-CP3), the
+key pair made at registration (section 6.3, M1-CP4) and the key pair made at
+login for old accounts (section 6.5, M1-CP5) are implemented and tested.
+Items marked *planned* are agreed but not implemented yet; this file is
+completed in M1-CP7.
 
 Author: Member 1 (Backend and Database). Read by: Members 2, 3 and 4.
 
@@ -43,7 +44,7 @@ Author: Member 1 (Backend and Database). Read by: Members 2, 3 and 4.
 | User private key | PKCS#8, encrypted with the user's own password (scrypt N = 2^14, r = 8, p = 1, AES-256-CBC; see 6.3), created on the server |
 | Key pair for new accounts | made by `register_user`, saved with the user in one transaction (M1-CP4) |
 | Key package | one block of text: version, request id, base64 ciphertext |
-| Existing users | accounts created before M1-CP4 have no key pair yet; they are meant to get one at their next successful login (*planned*, M1-CP5) |
+| Existing users | accounts created before M1-CP4 get a key pair at their next successful login, made by `ensure_user_key` (M1-CP5, section 6.5) |
 | Database reset | not needed: `python init_db.py` adds the new tables |
 | Share key K | random, 32 bytes, one per request; stored only wrapped with MASTER_KEY |
 | Shared copy cipher | AES-256-GCM, AAD = request id + file id |
@@ -263,7 +264,8 @@ generate_user_keypair(password) -> (public_pem, encrypted_private_pem)  # both b
   shows that message with HTTP status 500. Registering costs about one second
   more (key generation); a username that is already taken still pays it,
   because there is no pre-check, and the register throttle limits the damage.
-- Accounts created before M1-CP4 have no key pair yet.
+- Accounts created before M1-CP4 have no key pair until their next successful
+  login (section 6.5).
 
 ### 6.4 Test keys (`tests/conftest.py`)
 
@@ -278,10 +280,61 @@ freshly generated key asks for the `real_keygen` fixture. Tests that check
 "a third user can not use A's package" must keep their users within the first
 three of the test (the shared fixtures A, B and C of M1-CP6 will).
 
-### 6.5 Planned (not implemented yet)
+### 6.5 Implemented in M1-CP5: the key pair at login (`ensure_user_key`)
 
-- `ensure_user_key(user, password)` at login, for accounts that have no key
-  pair yet (M1-CP5).
+`ensure_user_key(user, password)` in `app/auth/services.py` gives an old
+account (a `user` row without a `user_key` row) its key pair. The login route
+calls it after `authenticate` and `login_succeeded` have succeeded and before
+`login_user`, with the password that was just verified. Failed, unknown and
+throttled logins never reach it.
+
+It returns one of five values and does not raise for database or key
+generation problems:
+
+| Value | Meaning |
+| --- | --- |
+| `KEY_PRESENT` | the user already has a key pair; nothing was changed |
+| `KEY_CREATED` | a key pair was made and saved (one commit) |
+| `KEY_KEYGEN_FAILED` | `generate_user_keypair` failed; nothing was saved |
+| `KEY_SAVE_FAILED` | the commit failed; rolled back, nothing was saved |
+| `KEY_CHECK_FAILED` | the first question to the database failed; nothing was done |
+
+- **Order.** Look for an existing `user_key` row first (cheap); only when
+  there is none, check the password again, make the key pair, add the row and
+  commit once. An account that already has a key pair costs one query.
+- **Password check inside the function.** It uses `verify_password`, the same
+  NFKC path as `authenticate`, so a password that logged in is never refused
+  here (tested with decomposed, composed and full-width forms). A password that
+  does not match raises `ValueError`; a wrong type raises `TypeError`; so does
+  a `user` that is not a `User`. The key pair is encrypted with the password
+  and must never be made from a password that was not verified.
+- **Only two exceptions are caught:** `CryptoError` and `SQLAlchemyError`.
+  Any other exception is a bug and is not hidden.
+- **A failure never blocks the login.** The user logs in without a key pair
+  and nothing half-finished is left in the database. The login route writes a
+  WARNING to the app log with the user id and the reason only (for example
+  `keygen_failed`), never a password, a key or an exception text. The next
+  successful login tries again.
+- **Race.** Two first logins at the same time may both make a key pair, but
+  `user_key.user_id` is the primary key, so only one row is saved. The loser
+  gets an `IntegrityError`, rolls back, reads the winner's row and returns
+  `KEY_PRESENT`. The first login of an old account costs about one second
+  more (key generation).
+- **`authenticate` is unchanged.** It only reads (there is no password rehash
+  anywhere), so the `rollback()` in `ensure_user_key` can not discard a pending
+  write of the login.
+
+**For Member 3.** A user who logs in while key creation failed enters
+**without** a `user_key` row. Code that needs the key pair (creating or
+unlocking a request) must check for it and handle its absence explicitly (a
+clear message, not a 500). `ensure_user_key` is public: it can be called again
+when the user types the password again, for example at unlock.
+
+**No change-password feature exists.** If one is added, the private key in
+`user_key` must be re-encrypted with the new password in the same change.
+
+### 6.6 Planned (not implemented yet)
+
 - Shared test fixtures for a requester (A), an owner (B) and a third user (C),
   each with a valid `user_key` (M1-CP6).
 
