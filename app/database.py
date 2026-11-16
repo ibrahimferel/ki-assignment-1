@@ -18,7 +18,16 @@ from app.extensions import db
 
 __all__ = ["InitDbError", "InitDbReport", "init_db"]
 
-EXPECTED_TABLES = frozenset({"user", "stored_file", "cipher_copy"})
+EXPECTED_TABLES = frozenset(
+    {
+        "user",
+        "stored_file",
+        "cipher_copy",
+        "user_key",
+        "access_request",
+        "shared_copy",
+    }
+)
 STORAGE_MODE = 0o700  # only the owner may read, write or list the folder
 
 

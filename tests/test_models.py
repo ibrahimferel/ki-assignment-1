@@ -1,15 +1,18 @@
-"""Tests for the database models (docs/data-model.md).
+"""Tests for the database models (docs/data-model.md and
+docs/sharing-design.md).
 
 Database-level rules (CHECK, UNIQUE, foreign keys) are tested with raw SQL so
 that the Python validators can not hide a missing database rule.
 """
 
 import re
+import secrets
 import subprocess
 import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import event, inspect, text
@@ -18,7 +21,15 @@ from sqlalchemy.exc import IntegrityError
 from app import create_app
 from app.config import TestingConfig
 from app.extensions import db
-from app.models import CipherCopy, StoredFile, User
+from app import models as models_module
+from app.models import (
+    AccessRequest,
+    CipherCopy,
+    SharedCopy,
+    StoredFile,
+    User,
+    UserKey,
+)
 
 # Every test here needs the app (and its context) from conftest.py.
 pytestmark = pytest.mark.usefixtures("app")
@@ -40,6 +51,21 @@ INSERT_COPY = (
     "storage_name, ciphertext_size, encrypt_seconds) VALUES "
     "(:file_id, :algorithm, :mode, :iv, :wrapped_key, :storage_name, "
     ":ciphertext_size, :encrypt_seconds)"
+)
+INSERT_USER_KEY = (
+    "INSERT INTO user_key (user_id, public_key_pem, encrypted_private_key, "
+    "created_at) VALUES (:user_id, :public_key_pem, "
+    ":encrypted_private_key, '2026-01-01 00:00:00')"
+)
+INSERT_REQUEST = (
+    "INSERT INTO access_request (requester_id, owner_id, status, reason, "
+    "created_at) VALUES (:requester_id, :owner_id, :status, :reason, "
+    "'2026-01-01 00:00:00')"
+)
+INSERT_SHARED = (
+    "INSERT INTO shared_copy (request_id, file_id, nonce, storage_name, "
+    "ciphertext_size) VALUES (:request_id, :file_id, :nonce, "
+    ":storage_name, :ciphertext_size)"
 )
 
 
@@ -72,6 +98,39 @@ def copy_row(file_id, **changes):
         "storage_name": "n" * 32,
         "ciphertext_size": 1,
         "encrypt_seconds": 0.5,
+    }
+    row.update(changes)
+    return row
+
+
+def key_row(user_id, **changes):
+    row = {
+        "user_id": user_id,
+        "public_key_pem": b"public-key-bytes",
+        "encrypted_private_key": b"encrypted-key-bytes",
+    }
+    row.update(changes)
+    return row
+
+
+def request_row(requester_id, owner_id, **changes):
+    row = {
+        "requester_id": requester_id,
+        "owner_id": owner_id,
+        "status": "pending",
+        "reason": "for my doctor",
+    }
+    row.update(changes)
+    return row
+
+
+def shared_row(request_id, file_id, **changes):
+    row = {
+        "request_id": request_id,
+        "file_id": file_id,
+        "nonce": b"\x03" * 12,
+        "storage_name": "s" * 32,
+        "ciphertext_size": 48,
     }
     row.update(changes)
     return row
@@ -212,6 +271,32 @@ EXPECTED_COLUMNS = {
         "ciphertext_size": ("INTEGER", False),
         "encrypt_seconds": ("FLOAT", False),
     },
+    "user_key": {
+        "user_id": ("INTEGER", False),
+        "public_key_pem": ("BLOB", False),
+        "encrypted_private_key": ("BLOB", False),
+        "created_at": ("DATETIME", False),
+    },
+    "access_request": {
+        "id": ("INTEGER", False),
+        "requester_id": ("INTEGER", False),
+        "owner_id": ("INTEGER", False),
+        "status": ("VARCHAR(16)", False),
+        "reason": ("VARCHAR(500)", False),
+        "created_at": ("DATETIME", False),
+        "decided_at": ("DATETIME", True),
+        "wrapped_share_key": ("BLOB", True),
+        "key_package": ("TEXT", True),
+        "unlocked_at": ("DATETIME", True),
+    },
+    "shared_copy": {
+        "id": ("INTEGER", False),
+        "request_id": ("INTEGER", False),
+        "file_id": ("INTEGER", False),
+        "nonce": ("BLOB", False),
+        "storage_name": ("VARCHAR(64)", False),
+        "ciphertext_size": ("INTEGER", False),
+    },
 }
 
 
@@ -268,6 +353,33 @@ def test_unique_rules_foreign_keys_and_indexes_match_the_data_model():
     }
     assert indexes("stored_file") == {("owner_id",)}
     assert indexes("cipher_copy") == {("file_id",)}
+
+    # Assignment 2. The partial unique index (requester_id, owner_id) is an
+    # index, not a table constraint, so it is listed with the indexes.
+    assert uniques("user_key") == set()
+    assert uniques("access_request") == set()
+    assert uniques("shared_copy") == {
+        frozenset({"request_id", "file_id"}),
+        frozenset({"storage_name"}),
+    }
+    assert foreign_keys("user_key") == {
+        (("user_id",), "user", ("id",), "CASCADE")
+    }
+    assert foreign_keys("access_request") == {
+        (("requester_id",), "user", ("id",), "CASCADE"),
+        (("owner_id",), "user", ("id",), "CASCADE"),
+    }
+    assert foreign_keys("shared_copy") == {
+        (("request_id",), "access_request", ("id",), "CASCADE"),
+        (("file_id",), "stored_file", ("id",), "CASCADE"),
+    }
+    assert indexes("user_key") == set()
+    assert indexes("access_request") == {
+        ("requester_id",),
+        ("owner_id",),
+        ("requester_id", "owner_id"),
+    }
+    assert indexes("shared_copy") == {("file_id",)}
 
 
 # ------------------------------------------------------------- relationships
@@ -791,3 +903,586 @@ def test_unsaved_users_are_different_objects():
     second = User(username="bobby", password_hash="x" * 20)
     assert first != second and first == first
     assert len({first, second}) == 2
+
+
+
+# ======================================================================
+# Assignment 2: user_key, access_request and shared_copy
+# ======================================================================
+
+SHARING_TABLES = (
+    "user",
+    "stored_file",
+    "cipher_copy",
+    "user_key",
+    "access_request",
+    "shared_copy",
+)
+
+
+def all_counts():
+    return tuple(count(table) for table in SHARING_TABLES)
+
+
+def add_request(requester, owner, **changes):
+    values = {
+        "requester": requester,
+        "owner": owner,
+        "reason": "for my doctor",
+    }
+    values.update(changes)
+    request = AccessRequest(**values)
+    db.session.add(request)
+    db.session.commit()
+    return request
+
+
+def add_shared(request, stored, **changes):
+    values = {
+        "request": request,
+        "file": stored,
+        "nonce": b"\x03" * 12,
+        "storage_name": secrets.token_hex(16),
+        "ciphertext_size": 48,
+    }
+    values.update(changes)
+    shared = SharedCopy(**values)
+    db.session.add(shared)
+    db.session.commit()
+    return shared
+
+
+def add_key(user):
+    key = UserKey(
+        user=user,
+        public_key_pem=b"public-" + user.username.encode(),
+        encrypted_private_key=b"encrypted-" + user.username.encode(),
+    )
+    db.session.add(key)
+    db.session.commit()
+    return key
+
+
+@pytest.fixture()
+def pair(make_user):
+    """alice (the requester) and bobby (the owner)."""
+    return make_user("alice"), make_user("bobby")
+
+
+@pytest.fixture()
+def world(make_user, make_file):
+    """Three users with keys, two files and two requests with a shared copy.
+
+    alice asks bobby (for bobby's file) and carol (for carol's file).
+    """
+    alice, bobby, carol = (
+        make_user("alice"),
+        make_user("bobby"),
+        make_user("carol"),
+    )
+    for user in (alice, bobby, carol):
+        add_key(user)
+    bobby_file, carol_file = make_file(bobby), make_file(carol)
+    to_bobby = add_request(alice, bobby)
+    to_carol = add_request(alice, carol)
+    add_shared(to_bobby, bobby_file)
+    add_shared(to_carol, carol_file)
+    return SimpleNamespace(
+        alice=alice,
+        bobby=bobby,
+        carol=carol,
+        bobby_file=bobby_file,
+        carol_file=carol_file,
+        to_bobby=to_bobby,
+        to_carol=to_carol,
+    )
+
+
+@pytest.fixture()
+def shared(make_user, make_file):
+    """A bare pending request row and two files of its owner, for raw SQL."""
+    alice, bobby = make_user("alice"), make_user("bobby")
+    first, second = make_file(bobby), make_file(bobby, filename="b.pdf")
+    execute(INSERT_REQUEST, request_row(alice.id, bobby.id))
+    request_id = db.session.execute(
+        text("SELECT id FROM access_request")
+    ).scalar()
+    return SimpleNamespace(
+        alice=alice,
+        bobby=bobby,
+        request_id=request_id,
+        file_id=first.id,
+        other_file_id=second.id,
+    )
+
+
+def test_the_key_sharing_tables_start_empty():
+    assert all_counts() == (0, 0, 0, 0, 0, 0)
+
+
+def test_the_sharing_names_are_exported():
+    for name in (
+        "UserKey",
+        "AccessRequest",
+        "SharedCopy",
+        "REQUEST_STATUSES",
+    ):
+        assert name in models_module.__all__
+    assert models_module.REQUEST_STATUSES == (
+        "pending",
+        "approved",
+        "rejected",
+    )
+
+
+# ------------------------------------------------------------- creating
+
+
+def test_key_requests_and_shared_copies_are_saved(pair, make_file):
+    alice, bobby = pair
+    stored = make_file(bobby)
+    add_key(alice)
+    add_key(bobby)
+    request = add_request(alice, bobby)
+    add_shared(request, stored)
+
+    assert all_counts() == (2, 1, 3, 2, 1, 1)
+    assert request.status == "pending"  # the default
+    assert request.decided_at is None
+    assert request.wrapped_share_key is None
+    assert request.key_package is None
+    assert request.unlocked_at is None
+    assert request.created_at.tzinfo is None  # naive UTC like the others
+
+
+def test_the_key_sharing_relationships_work_in_both_directions(
+    pair, make_file
+):
+    alice, bobby = pair
+    stored = make_file(bobby)
+    add_key(alice)
+    request = add_request(alice, bobby)
+    copy = add_shared(request, stored)
+    db.session.expire_all()
+
+    assert alice.key.user is alice
+    assert bobby.key is None  # no key pair saved for bobby
+    assert alice.requests_made == [request]
+    assert alice.requests_received == []
+    assert bobby.requests_received == [request]
+    assert bobby.requests_made == []
+    assert request.requester is alice and request.owner is bobby
+    assert request.shared_copies == [copy] and copy.request is request
+    assert copy.file is stored and stored.shared_copies == [copy]
+
+
+def test_the_approval_columns_round_trip(pair):
+    alice, bobby = pair
+    request = add_request(alice, bobby)
+    request.status = "approved"
+    request.decided_at = datetime(2026, 1, 2, 3, 4, 5)
+    request.wrapped_share_key = b"\x00\xff" * 30 + b"\x00"
+    request.key_package = "v1.7.QUJDRA==\nsecond line"
+    request.unlocked_at = datetime(2026, 1, 3, 4, 5, 6)
+    db.session.commit()
+    db.session.expire_all()
+
+    assert request.status == "approved"
+    assert request.decided_at == datetime(2026, 1, 2, 3, 4, 5)
+    assert request.wrapped_share_key == b"\x00\xff" * 30 + b"\x00"
+    assert request.key_package == "v1.7.QUJDRA==\nsecond line"
+    assert request.unlocked_at == datetime(2026, 1, 3, 4, 5, 6)
+
+
+def test_user_key_bytes_round_trip(make_user):
+    user = make_user()
+    key = UserKey(
+        user=user,
+        public_key_pem=b"-----BEGIN PUBLIC KEY-----\n\x00\xff\n",
+        encrypted_private_key=b"\x00\x01\x02" * 100,
+    )
+    db.session.add(key)
+    db.session.commit()
+    db.session.expire_all()
+
+    assert key.public_key_pem == b"-----BEGIN PUBLIC KEY-----\n\x00\xff\n"
+    assert key.encrypted_private_key == b"\x00\x01\x02" * 100
+    assert key.created_at.tzinfo is None
+    assert key.user_id == user.id
+
+
+# ----------------------------------------------- user_key constraints
+
+
+def test_a_user_can_have_only_one_key_pair(make_user):
+    user = make_user()
+    execute(INSERT_USER_KEY, key_row(user.id))
+    assert_rejected(INSERT_USER_KEY, key_row(user.id))
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"user_id": 9999},
+        {"public_key_pem": None},
+        {"encrypted_private_key": None},
+    ],
+    ids=["user-does-not-exist", "no-public-key", "no-private-key"],
+)
+def test_database_refuses_invalid_user_keys(make_user, changes):
+    row = key_row(make_user().id)
+    row.update(changes)
+    assert_rejected(INSERT_USER_KEY, row)
+
+
+# ------------------------------------------ access_request constraints
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"status": "done"},
+        {"status": "Pending"},
+        {"status": ""},
+        {"status": None},
+        {"reason": None},
+        {"requester_id": None},
+        {"owner_id": None},
+        {"requester_id": 9999},
+        {"owner_id": 9999},
+    ],
+    ids=[
+        "unknown-status",
+        "status-case-sensitive",
+        "empty-status",
+        "no-status",
+        "no-reason",
+        "no-requester",
+        "no-owner",
+        "requester-does-not-exist",
+        "owner-does-not-exist",
+    ],
+)
+def test_database_refuses_invalid_requests(pair, changes):
+    row = request_row(pair[0].id, pair[1].id)
+    row.update(changes)
+    assert_rejected(INSERT_REQUEST, row)
+
+
+@pytest.mark.parametrize("status", ["pending", "approved", "rejected"])
+def test_every_documented_status_is_accepted(pair, status):
+    execute(INSERT_REQUEST, request_row(pair[0].id, pair[1].id, status=status))
+    assert count("access_request") == 1
+
+
+def test_a_user_can_not_request_access_to_their_own_data(make_user):
+    user = make_user()
+    assert_rejected(INSERT_REQUEST, request_row(user.id, user.id))
+
+
+def test_the_orm_also_refuses_a_request_to_oneself(make_user):
+    user = make_user()
+    db.session.add(AccessRequest(requester=user, owner=user, reason="x"))
+    with pytest.raises(IntegrityError):
+        db.session.commit()
+    db.session.rollback()
+
+
+def test_a_second_pending_request_for_the_same_pair_is_refused(pair):
+    alice, bobby = pair
+    execute(INSERT_REQUEST, request_row(alice.id, bobby.id))
+    assert_rejected(INSERT_REQUEST, request_row(alice.id, bobby.id))
+    assert count("access_request") == 1
+
+
+def test_the_orm_also_refuses_a_second_pending_request(pair):
+    alice, bobby = pair
+    add_request(alice, bobby)
+    db.session.add(AccessRequest(requester=alice, owner=bobby, reason="again"))
+    with pytest.raises(IntegrityError):
+        db.session.commit()
+    db.session.rollback()
+    assert count("access_request") == 1
+
+
+def test_the_pending_rule_covers_only_one_pair_in_one_direction(
+    pair, make_user
+):
+    alice, bobby = pair
+    carol = make_user("carol")
+    execute(INSERT_REQUEST, request_row(alice.id, bobby.id))
+    execute(INSERT_REQUEST, request_row(bobby.id, alice.id))  # reversed
+    execute(INSERT_REQUEST, request_row(carol.id, bobby.id))  # other asker
+    execute(INSERT_REQUEST, request_row(alice.id, carol.id))  # other owner
+    assert count("access_request") == 4
+
+
+def test_a_decided_request_does_not_block_a_new_pending_one(pair):
+    alice, bobby = pair
+    for status in ("approved", "rejected", "approved", "rejected"):
+        execute(
+            INSERT_REQUEST,
+            request_row(alice.id, bobby.id, status=status),
+        )
+    execute(INSERT_REQUEST, request_row(alice.id, bobby.id))  # pending
+    assert count("access_request") == 5
+    assert_rejected(INSERT_REQUEST, request_row(alice.id, bobby.id))
+
+
+def test_deciding_a_pending_request_frees_the_pair(pair):
+    alice, bobby = pair
+    execute(INSERT_REQUEST, request_row(alice.id, bobby.id))
+    execute("UPDATE access_request SET status = 'approved'", {})
+    execute(INSERT_REQUEST, request_row(alice.id, bobby.id))
+    assert count("access_request") == 2
+
+
+def test_a_decided_request_can_not_become_pending_next_to_a_pending_one(
+    pair,
+):
+    alice, bobby = pair
+    execute(INSERT_REQUEST, request_row(alice.id, bobby.id, status="approved"))
+    execute(INSERT_REQUEST, request_row(alice.id, bobby.id))
+    assert_rejected(
+        "UPDATE access_request SET status = 'pending' "
+        "WHERE status = 'approved'",
+        {},
+    )
+
+
+def test_the_pending_rule_is_a_partial_unique_index():
+    sql = db.session.execute(
+        text(
+            "SELECT sql FROM sqlite_master "
+            "WHERE name = 'uq_access_request_pending_pair'"
+        )
+    ).scalar()
+    assert sql is not None
+    normalised = " ".join(sql.split()).lower()
+    assert normalised.startswith("create unique index")
+    assert "requester_id, owner_id" in normalised
+    assert normalised.endswith("where status = 'pending'")
+
+
+# --------------------------------------------- shared_copy constraints
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"nonce": None},
+        {"storage_name": None},
+        {"ciphertext_size": None},
+        {"request_id": None},
+        {"request_id": 9999},
+        {"file_id": None},
+        {"file_id": 9999},
+    ],
+    ids=[
+        "no-nonce",
+        "no-storage-name",
+        "no-size",
+        "no-request",
+        "request-does-not-exist",
+        "no-file",
+        "file-does-not-exist",
+    ],
+)
+def test_database_refuses_invalid_shared_copies(shared, changes):
+    row = shared_row(shared.request_id, shared.file_id)
+    row.update(changes)
+    assert_rejected(INSERT_SHARED, row)
+
+
+def test_a_file_can_be_shared_only_once_per_request(shared):
+    execute(INSERT_SHARED, shared_row(shared.request_id, shared.file_id))
+    assert_rejected(
+        INSERT_SHARED,
+        shared_row(shared.request_id, shared.file_id, storage_name="t" * 32),
+    )
+
+
+def test_two_shared_copies_can_not_share_a_storage_name(shared):
+    execute(INSERT_SHARED, shared_row(shared.request_id, shared.file_id))
+    assert_rejected(
+        INSERT_SHARED, shared_row(shared.request_id, shared.other_file_id)
+    )
+
+
+def test_one_request_can_share_several_files(shared):
+    execute(INSERT_SHARED, shared_row(shared.request_id, shared.file_id))
+    execute(
+        INSERT_SHARED,
+        shared_row(
+            shared.request_id, shared.other_file_id, storage_name="t" * 32
+        ),
+    )
+    assert count("shared_copy") == 2
+
+
+def test_the_same_file_can_be_shared_in_two_requests(shared):
+    execute(
+        INSERT_REQUEST,
+        request_row(shared.alice.id, shared.bobby.id, status="approved"),
+    )
+    other_request = db.session.execute(
+        text("SELECT MAX(id) FROM access_request")
+    ).scalar()
+    assert other_request != shared.request_id
+    execute(INSERT_SHARED, shared_row(shared.request_id, shared.file_id))
+    execute(
+        INSERT_SHARED,
+        shared_row(other_request, shared.file_id, storage_name="t" * 32),
+    )
+    assert count("shared_copy") == 2
+
+
+# --------------------------------------------------------- the cascade
+
+
+def test_deleting_the_requester_removes_what_they_asked_and_their_key(world):
+    assert all_counts() == (3, 2, 6, 3, 2, 2)
+
+    db.session.delete(world.alice)
+    db.session.commit()
+
+    # alice's key, both requests and both shared copies are gone; the
+    # owners, their files and their keys stay.
+    assert all_counts() == (2, 2, 6, 2, 0, 0)
+
+
+def test_deleting_an_owner_removes_the_requests_made_to_them(world):
+    db.session.delete(world.bobby)
+    db.session.commit()
+
+    # bobby, his key, his file (and its 3 copies), the request to him and its
+    # shared copy are gone. alice's request to carol is untouched.
+    assert all_counts() == (2, 1, 3, 2, 1, 1)
+    assert db.session.get(AccessRequest, world.to_carol.id) is not None
+
+
+def test_deleting_a_file_removes_its_shared_copies_only(world):
+    db.session.delete(world.bobby_file)
+    db.session.commit()
+
+    assert all_counts() == (3, 1, 3, 3, 2, 1)  # both requests still exist
+    assert db.session.get(AccessRequest, world.to_bobby.id) is not None
+
+
+def test_deleting_a_request_removes_its_shared_copies_only(world):
+    db.session.delete(world.to_bobby)
+    db.session.commit()
+
+    assert all_counts() == (3, 2, 6, 3, 1, 1)  # the file is still there
+    assert db.session.get(StoredFile, world.bobby_file.id) is not None
+
+
+def test_the_database_itself_cascades_a_plain_sql_delete_of_users(world):
+    db.session.expunge_all()
+
+    execute('DELETE FROM "user"', {})
+
+    assert all_counts() == (0, 0, 0, 0, 0, 0)
+
+
+def test_the_database_itself_cascades_a_plain_sql_delete_of_a_file(world):
+    db.session.expunge_all()
+
+    execute("DELETE FROM stored_file", {})
+
+    assert all_counts() == (3, 0, 0, 3, 2, 0)
+
+
+def test_deleting_a_user_with_sharing_data_is_one_statement(world):
+    # passive_deletes again, for the new relationships: the database does
+    # the cascade, so the ORM sends a single DELETE.
+    victim_id = world.bobby.id
+    db.session.expunge_all()
+    victim = db.session.get(User, victim_id)
+    statements = []
+
+    def record(conn, cursor, statement, parameters, context, many):
+        statements.append(statement)
+
+    event.listen(db.engine, "before_cursor_execute", record)
+    try:
+        db.session.delete(victim)
+        db.session.commit()
+    finally:
+        event.remove(db.engine, "before_cursor_execute", record)
+
+    assert len(statements) == 1
+    assert statements[0].lstrip().upper().startswith("DELETE FROM")
+    for table in ("user_key", "access_request", "shared_copy"):
+        assert table not in statements[0]
+    assert all_counts() == (2, 1, 3, 2, 1, 1)
+
+
+# -------------------------------------------------------- validators
+
+
+@pytest.mark.parametrize(
+    "name", ["a" * 16, "Ab-9_" * 3 + "x", "z" * 64, "0123456789abcdef"]
+)
+def test_shared_storage_name_accepts_random_looking_names(name):
+    assert SharedCopy(storage_name=name).storage_name == name
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "a" * 15,
+        "a" * 65,
+        "a" * 15 + ".",
+        "a" * 15 + "/",
+        "../" + "a" * 16,
+        "a" * 16 + "\n",
+        "a" * 15 + "\x00",
+        "",
+    ],
+    ids=[
+        "too-short",
+        "too-long",
+        "dot",
+        "slash",
+        "parent-folder",
+        "trailing-newline",
+        "nul",
+        "empty",
+    ],
+)
+def test_shared_storage_name_rejects_anything_that_could_be_a_path(name):
+    with pytest.raises(ValueError):
+        SharedCopy(storage_name=name)
+
+
+@pytest.mark.parametrize("bad", [b"a" * 16, 12345678901234567])
+def test_shared_storage_name_must_be_text(bad):
+    with pytest.raises(TypeError):
+        SharedCopy(storage_name=bad)
+
+
+# ------------------------------------------- secrets stay out of text
+
+
+def test_repr_of_the_sharing_models_shows_no_key_material(pair, make_file):
+    alice, bobby = pair
+    stored = make_file(bobby)
+    key = UserKey(
+        user=alice,
+        public_key_pem=b"SENTINEL_PUBLIC",
+        encrypted_private_key=b"SENTINEL_ENCRYPTED_PRIVATE",
+    )
+    db.session.add(key)
+    request = add_request(alice, bobby, reason="SENTINEL_REASON")
+    request.wrapped_share_key = b"SENTINEL_WRAPPED_SHARE"
+    request.key_package = "SENTINEL_PACKAGE"
+    copy = add_shared(request, stored, nonce=b"SENTINEL_NONCE12")
+    db.session.commit()
+
+    for obj in (key, request, copy):
+        for shown in (repr(obj), str(obj), f"{obj!r}", repr([obj])):
+            assert "SENTINEL" not in shown
+        assert re.fullmatch(
+            r"<(UserKey|AccessRequest|SharedCopy) \d+>", repr(obj)
+        )

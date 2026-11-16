@@ -17,7 +17,17 @@ from app.config import ConfigError, TestingConfig
 from app.database import InitDbError, init_db
 from app.extensions import db
 
-TABLES = ["cipher_copy", "stored_file", "user"]
+TABLES = [
+    "access_request",
+    "cipher_copy",
+    "shared_copy",
+    "stored_file",
+    "user",
+    "user_key",
+]
+# The tables that existed before Assignment 2 (key management).
+OLD_TABLES = ["cipher_copy", "stored_file", "user"]
+NEW_TABLES = ["access_request", "shared_copy", "user_key"]
 posix_only = pytest.mark.skipif(
     os.name != "posix", reason="owner-only folders need POSIX permissions"
 )
@@ -139,6 +149,64 @@ def test_running_again_changes_nothing_and_keeps_the_data(make_app, tmp_path):
     assert rows == [("keepme",)]
 
 
+def test_an_assignment_1_database_gets_the_new_tables_and_keeps_its_data(
+    make_app, tmp_path
+):
+    flask_app = make_app()
+    with flask_app.app_context():
+        old = [db.metadata.tables[name] for name in OLD_TABLES]
+        db.metadata.create_all(db.engine, tables=old)
+    assert table_names(tmp_path) == OLD_TABLES
+    run_sql(
+        tmp_path,
+        'INSERT INTO "user" (username, password_hash, created_at) '
+        "VALUES ('keepme', 'h', '2026-01-01 00:00:00')",
+        "INSERT INTO stored_file (owner_id, kind, original_filename, "
+        "content_type, plaintext_size, plaintext_sha256, created_at) "
+        "VALUES (1, 'document', 'a.pdf', 'application/pdf', 1, "
+        "'" + "0" * 64 + "', '2026-01-01 00:00:00')",
+        "INSERT INTO cipher_copy (file_id, algorithm, mode, iv, wrapped_key, "
+        "storage_name, ciphertext_size, encrypt_seconds) VALUES "
+        "(1, 'AES', 'CBC', x'01', x'02', '" + "n" * 32 + "', 1, 0.5)",
+    )
+    con = sqlite3.connect(str(db_file(tmp_path)))
+    try:
+        before = con.execute(
+            "SELECT name, sql FROM sqlite_master WHERE name IN "
+            "('user', 'stored_file', 'cipher_copy') ORDER BY name"
+        ).fetchall()
+    finally:
+        con.close()
+
+    report = init_db(flask_app)
+
+    assert report.tables_created == tuple(NEW_TABLES)
+    assert report.tables_existing == tuple(OLD_TABLES)
+    assert table_names(tmp_path) == TABLES
+    con = sqlite3.connect(str(db_file(tmp_path)))
+    try:
+        after = con.execute(
+            "SELECT name, sql FROM sqlite_master WHERE name IN "
+            "('user', 'stored_file', 'cipher_copy') ORDER BY name"
+        ).fetchall()
+        assert after == before  # the old tables were not altered
+        assert con.execute('SELECT username FROM "user"').fetchall() == [
+            ("keepme",)
+        ]
+        assert con.execute("SELECT COUNT(*) FROM stored_file").fetchone() == (
+            1,
+        )
+        assert con.execute("SELECT COUNT(*) FROM cipher_copy").fetchone() == (
+            1,
+        )
+        for name in NEW_TABLES:
+            assert con.execute(f"SELECT COUNT(*) FROM {name}").fetchone() == (
+                0,
+            )
+    finally:
+        con.close()
+
+
 def test_a_missing_table_is_recreated_and_the_rest_reported(
     make_app, tmp_path
 ):
@@ -149,7 +217,9 @@ def test_a_missing_table_is_recreated_and_the_rest_reported(
     report = init_db(flask_app)
 
     assert report.tables_created == ("cipher_copy",)
-    assert report.tables_existing == ("stored_file", "user")
+    assert report.tables_existing == tuple(
+        name for name in TABLES if name != "cipher_copy"
+    )
     assert table_names(tmp_path) == TABLES
 
 
@@ -392,12 +462,10 @@ def test_the_command_reports_what_it_did(make_app, monkeypatch, capsys):
     second = capsys.readouterr()
 
     assert first.err == "" and second.err == ""
-    assert "Tables created: cipher_copy, stored_file, user" in first.out
+    assert "Tables created: " + ", ".join(TABLES) in first.out
     assert "Storage folder (created):" in first.out
     assert "Tables created" not in second.out
-    assert (
-        "Tables already present: cipher_copy, stored_file, user" in second.out
-    )
+    assert "Tables already present: " + ", ".join(TABLES) in second.out
     assert "Storage folder (already present):" in second.out
 
 
