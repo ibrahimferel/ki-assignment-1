@@ -261,9 +261,10 @@ generate_user_keypair(password) -> (public_pem, encrypted_private_pem)  # both b
   once. A failure while making the key pair raises `KeyGenerationError`
   ("Could not create the account. Please try again.", no `__context__`) before
   the database is touched, so no `user` row is left behind. The register page
-  shows that message with HTTP status 500. Registering costs about one second
-  more (key generation); a username that is already taken still pays it,
-  because there is no pre-check, and the register throttle limits the damage.
+  shows that message with HTTP status 500. Registering costs about one to a few
+  seconds more on an ordinary laptop (key generation); a username that is
+  already taken still pays it, because there is no pre-check, and the register
+  throttle limits the damage.
 - Accounts created before M1-CP4 have no key pair until their next successful
   login (section 6.5).
 
@@ -318,8 +319,8 @@ generation problems:
 - **Race.** Two first logins at the same time may both make a key pair, but
   `user_key.user_id` is the primary key, so only one row is saved. The loser
   gets an `IntegrityError`, rolls back, reads the winner's row and returns
-  `KEY_PRESENT`. The first login of an old account costs about one second
-  more (key generation).
+  `KEY_PRESENT`. The first login of an old account costs about one to a few
+  seconds more on an ordinary laptop (key generation).
 - **`authenticate` is unchanged.** It only reads (there is no password rehash
   anywhere), so the `rollback()` in `ensure_user_key` can not discard a pending
   write of the login.

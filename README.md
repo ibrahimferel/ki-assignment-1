@@ -1,4 +1,4 @@
-# Cryptography Assignment 1: core module (authentication, database, authorization)
+# Cryptography Assignments 1 and 2: core module (authentication, database, authorization, encrypted storage, key sharing tables)
 
 A Flask + SQLite + SQLAlchemy web application designed to store personal data,
 ID card (KTP) images, documents (PDF/DOC/XLS) and videos in encrypted form
@@ -118,7 +118,9 @@ Rules the database enforces:
 - A user cannot request their own data.
 - `status` can only be `pending`, `approved` or `rejected`.
 - Deleting a user, a file or a request removes the rows that depend on it. The
-  ciphertext files on disk are not removed by this.
+  ciphertext files on disk are not removed by this cascade; `delete_record` in
+  `app/storage/services.py` removes the files of one record. There is no
+  user-deletion route or service.
 
 `app/authz.py` also has the requester-side helpers `get_requested_or_404` and
 `requested_select`. They check who made the request, not its status.
@@ -144,8 +146,11 @@ python run.py --port 8001
 ```
 
 Port 5000 is deliberately not the default because on macOS it is often used by
-the AirPlay Receiver service. Available pages: `/` (placeholder page),
-`/auth/register`, `/auth/login` and `/auth/logout`.
+the AirPlay Receiver service. Available pages: `/` (a landing page when
+signed out, a temporary storage test page when signed in), `/auth/register`,
+`/auth/login` and `/auth/logout`. The signed-in page uses the endpoints under
+`/storage/` (list, upload, personal data create/show/update, view, download,
+comparison, delete).
 
 ## Running the tests
 
@@ -153,7 +158,7 @@ the AirPlay Receiver service. Available pages: `/` (placeholder page),
 python -m pytest -q
 ```
 
-`pytest.ini` turns every warning into an error. Latest result on macOS: 958
+`pytest.ini` turns every warning into an error. Latest result on macOS: 1400
 tests passed. Style check (optional, not in `requirements.txt`):
 `pip install flake8`, then `flake8 app tests`.
 
@@ -171,16 +176,22 @@ app/
                        get_requested_or_404, requested_select (requester side)
   security_headers.py  security headers, CSP, Cache-Control
   request_limits.py    16 KiB body limit for /auth/*
-  placeholder.py       placeholder page "/"
+  placeholder.py       page "/": landing page (signed out) or storage test page (signed in)
   auth/                services (Argon2id), forms, routes, throttle, redirects
-  templates/           base.html, placeholder_home.html, auth/login.html, auth/register.html
+  crypto/              AES/DES/RC4 engine, per-copy keys, user RSA key pair (asymmetric.py)
+  storage/             upload, download and delete service, ciphertext files on disk, routes under /storage/
+  templates/           base.html, landing.html, placeholder_home.html, auth/login.html, auth/register.html
+  static/              css, js and images for the pages
 docs/
   auth-integration.md  guide for other members (protecting routes, CSRF, uploads, CSP)
   data-model.md        data model design and explanation
   sharing-design.md    key sharing tables and access helpers (Assignment 2)
-tests/                 automated tests (pytest)
+  Conversation With AI_*  conversation records (PDF and ZIP files)
+tests/                 automated tests (pytest); shared fixtures for the sharing tests: tests/sharing_fixtures.py
 init_db.py             creates the tables and the storage folder
 run.py                 development server entry point
+design.md              design specification of the web interface
+crypto_benchmark.csv   benchmark results (default output of tests/test_crypto_performance.py)
 ```
 
 ## Security summary (implemented and tested)
@@ -204,9 +215,12 @@ run.py                 development server entry point
 - **Body size:** `/auth/*` is limited to 16 KiB (413 if larger); other routes
   follow `MAX_UPLOAD_MB`.
 - **Access control:** a user's data can only be accessed by its owner through
-  `get_owned_or_404`; data owned by someone else and data that does not exist
-  both return 404. An inventory test checks every route in `app.url_map` (each
-  must require login and a CSRF token).
+  `get_owned_or_404` and `owned_select` (every `/storage/` route that reads,
+  changes or deletes a record goes through them); data owned by someone else
+  and data that does not exist both return 404. An inventory test checks every
+  route in `app.url_map` (static files aside): every route outside the public
+  ones (`/`, `/auth/login`, `/auth/register`) must require login, and every
+  route that changes state must refuse a missing or wrong CSRF token.
 - **Secrets:** `.env`, `instance/` and `*.db` files are ignored by Git; tests
   scan responses and logs for passwords, hashes and keys.
 
@@ -250,11 +264,15 @@ yet).
     columns of an existing table means recreating the database. [K]
 16. Design: DES and RC4 are weak; all three copies contain the same plaintext,
     so data confidentiality is only as strong as the weakest copy; whoever holds
-    `.env` and the database can open all data. The encryption module is not yet
-    in this branch. [K]
+    `.env` and the database can open all data. [K]
 17. The mutation figures in the report were run in a sandbox by an AI assistant
     and have not been reproduced on macOS. [M]
 18. Only Python 3.9 has been tested. [M]
+19. `stored_file.plaintext_sha256` holds an unsalted SHA-256 of the plaintext in
+    the database, so whoever has the database can test guesses of low-entropy
+    data. `init_db.py` also refuses a database whose `stored_file` table was
+    created without that column ("Table 'stored_file' already exists with
+    different columns"); delete `instance/app.db` and run it again. [K]
 
 ## Team roles
 
