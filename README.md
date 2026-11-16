@@ -108,7 +108,7 @@ The three key sharing tables are described in full in `docs/sharing-design.md`
 
 | Table | Holds | Key material |
 | --- | --- | --- |
-| `user_key` | one row per user: the public key and the private key | public key (PEM); the private key is designed to be stored encrypted with the user's own password |
+| `user_key` | one row per user: the public key and the private key | public key (PEM); for new accounts the private key is stored encrypted with the user's own password (scrypt, AES-256-CBC) |
 | `access_request` | a request from one user for another user's data, with its status (`pending`, `approved`, `rejected`) | wrapped share key and key package; empty until a request is approved |
 | `shared_copy` | one extra encrypted copy of a file for one request | nonce; the ciphertext itself is a file on disk, not in the database |
 
@@ -123,9 +123,11 @@ Rules the database enforces:
 `app/authz.py` also has the requester-side helpers `get_requested_or_404` and
 `requested_select`. They check who made the request, not its status.
 
-Current status: only the tables, their rules and these helpers exist. No code
-creates key pairs, requests or shared copies yet, and there are no sharing
-routes or pages; those are planned.
+Current status: the tables, their rules and these helpers exist, and
+registering a new account now creates its key pair (RSA-3072; the private key
+is encrypted with the account's password, see `docs/sharing-design.md`).
+Accounts created before that have no key pair yet. No code creates requests or
+shared copies, and there are no sharing routes or pages; those are planned.
 
 ## Running
 

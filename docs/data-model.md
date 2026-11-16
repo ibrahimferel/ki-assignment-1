@@ -39,9 +39,10 @@ user 1 ------< stored_file 1 ------< cipher_copy
 - Satu pengguna punya banyak data.
 - Satu data punya tepat tiga salinan (AES, DES, RC4).
 - Database hanya menyimpan metadata dan kunci dalam bentuk terlindungi: kunci
-  salinan dibungkus master key, kolom private key di `user_key` dirancang
-  memuat private key yang dienkripsi dengan password pengguna, dan kunci
-  publik memang publik. Tidak ada kunci mentah.
+  salinan dibungkus master key, kolom private key di `user_key` memuat
+  private key yang dienkripsi dengan password pengguna (untuk akun baru; akun
+  lama belum punya key), dan kunci publik memang publik. Tidak ada kunci
+  mentah.
   **Isi data (plaintext maupun ciphertext) tidak disimpan di database.**
   Ciphertext disimpan sebagai file di `instance/storage/`.
 
@@ -71,10 +72,10 @@ Nilai `kind` (daftar tertutup): `personal_data`, `id_card`, `document`,
 Tidak ada kolom kunci di `user`; pasangan kunci pengguna ada di tabel
 terpisah `user_key` (lihat `docs/sharing-design.md`). Untuk data Assignment 1
 (K3), kunci tidak bergantung pada password, sehingga ganti atau lupa password
-tidak membuat data itu hilang. Pengecualian (rancangan): private key di
-`user_key` dirancang dienkripsi dengan password pengguna, jadi lupa password
-berarti private key itu tidak bisa dibuka lagi (belum ada fitur ganti atau
-reset password).
+tidak membuat data itu hilang. Pengecualian: untuk akun baru, private key di
+`user_key` dienkripsi dengan password pengguna, jadi lupa password berarti
+private key itu tidak bisa dibuka lagi (belum ada fitur ganti atau reset
+password). Akun lama belum punya key.
 
 ### 3.1 Catatan username dan password
 

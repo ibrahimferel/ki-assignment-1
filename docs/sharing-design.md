@@ -1,9 +1,10 @@
 # Sharing design (Assignment 2: key management)
 
-Status: **short version, updated in M1-CP3**. The three tables below
-(M1-CP2) and the two requester-side access helpers in section 6.1 (M1-CP3)
-are implemented and tested. Items marked *planned* are agreed but not
-implemented yet; this file is completed in M1-CP7.
+Status: **short version, updated in M1-CP4**. The three tables below
+(M1-CP2), the two requester-side access helpers in section 6.1 (M1-CP3) and
+the key pair made at registration (section 6.3, M1-CP4) are implemented and
+tested. Items marked *planned* are agreed but not implemented yet; this file
+is completed in M1-CP7.
 
 Author: Member 1 (Backend and Database). Read by: Members 2, 3 and 4.
 
@@ -39,16 +40,17 @@ Author: Member 1 (Backend and Database). Read by: Members 2, 3 and 4.
 | Topic | Decision |
 | --- | --- |
 | Asymmetric algorithm | RSA-3072 with OAEP and SHA-256 |
-| User private key | PKCS#8, encrypted with the user's own password, created on the server |
+| User private key | PKCS#8, encrypted with the user's own password (scrypt N = 2^14, r = 8, p = 1, AES-256-CBC; see 6.3), created on the server |
+| Key pair for new accounts | made by `register_user`, saved with the user in one transaction (M1-CP4) |
 | Key package | one block of text: version, request id, base64 ciphertext |
-| Existing users | get a key pair at their next successful login (*planned*) |
+| Existing users | accounts created before M1-CP4 have no key pair yet; they are meant to get one at their next successful login (*planned*, M1-CP5) |
 | Database reset | not needed: `python init_db.py` adds the new tables |
 | Share key K | random, 32 bytes, one per request; stored only wrapped with MASTER_KEY |
 | Shared copy cipher | AES-256-GCM, AAD = request id + file id |
 | GCM tag | **appended to the end of the ciphertext**; there is no tag column |
 | `shared_copy.ciphertext_size` | length of that whole blob (ciphertext + tag); the nonce is not included |
 | `shared_copy.nonce` | the GCM nonce, in its own column |
-| Password form | the NFKC-normalised password, the same form `authenticate` uses (*planned*, see 6) |
+| Password form | the NFKC-normalised password, encoded as UTF-8, the same form `authenticate` uses; `generate_user_keypair` applies it itself (see 6.3) |
 
 ## 4. Table contract (as implemented)
 
@@ -213,13 +215,75 @@ Things the helpers do **not** do:
 - The same 404 for "not yours" and "not there" is part of the design (no
   request id can be probed). Do not answer 403 or put ids in the message.
 
-### 6.3 Planned (not implemented yet)
+### 6.3 Implemented in M1-CP4: the key pair at registration
 
-- A key pair at registration (`register_user`, one transaction with the user
-  row) and for old accounts at the next login (`ensure_user_key`).
-- A small public function in `app/auth/services.py` that returns the
-  NFKC-normalised password, reusing `_check_password_shape`. Member 3 must use
-  the same form when the requester unlocks a package.
+`app/crypto/asymmetric.py` holds one public function (contract 1). The other
+functions of the contract belong to Member 2 and are not in that file.
+
+```python
+generate_user_keypair(password) -> (public_pem, encrypted_private_pem)  # both bytes
+```
+
+- RSA, 3072 bits, public exponent 65537.
+- Public key: PEM `SubjectPublicKeyInfo` (`BEGIN PUBLIC KEY`).
+- Private key: PEM PKCS#8 `BEGIN ENCRYPTED PRIVATE KEY`, protected by PBES2
+  with scrypt and AES-256-CBC. The parameters are written inside the PEM, so a
+  reader needs no configuration: **N = 2^14, r = 8, p = 1**, 16-byte random
+  salt (about 16 MiB of memory per guess).
+- **Why N = 2^14.** It was chosen for compatibility with `cryptography`
+  41.0.3, the version pinned in `requirements.txt`: with N = 2^15 or larger
+  that version fails to open the key ("Could not deserialize key data", tested),
+  while pycryptodome opens it. It is much stronger than the 2048-round PBKDF2
+  that `cryptography` 41.0.3 uses for a password-encrypted PKCS#8 (the rounds
+  can not be set in that version), **but it is below the current OWASP
+  recommendation** for scrypt (N = 2^17, r = 8, p = 1; that advice is for
+  password storage and is applied here by analogy). The value is a constant in
+  the module. Raising it later needs every reader of these keys to be able to
+  open the larger value; keys already stored keep the parameters written in
+  their own PEM.
+- **The password.** The function applies NFKC and then UTF-8 itself. That is
+  the same normalisation `authenticate` uses (`_check_password_shape`), so a
+  password that logs in also opens the private key. NFKC is idempotent, so a
+  caller that already normalised the password changes nothing. There is no
+  separate public helper in `app/auth/services.py` (this replaces the earlier
+  plan). **Whoever opens the private key later (Member 2's
+  `decrypt_with_password`, Member 3 at unlock) must apply the same two steps:
+  NFKC, then UTF-8 bytes.** Trap: pycryptodome turns a `str` passphrase into
+  latin-1 bytes, which does not match; always pass the UTF-8 `bytes`.
+- **Errors.** `CryptoError` with a fixed message, raised outside every `except`
+  block (no `__context__`): one message for an unusable password (not a `str`,
+  empty, longer than 1024 characters or not encodable), one for any failure
+  while making the key pair. The password policy itself (length, control
+  characters, common passwords) stays in `validate_password`.
+- **`register_user`.** Order: validate the username and password, hash the
+  password, make the key pair, then add the user and its `UserKey` and commit
+  once. A failure while making the key pair raises `KeyGenerationError`
+  ("Could not create the account. Please try again.", no `__context__`) before
+  the database is touched, so no `user` row is left behind. The register page
+  shows that message with HTTP status 500. Registering costs about one second
+  more (key generation); a username that is already taken still pays it,
+  because there is no pre-check, and the register throttle limits the damage.
+- Accounts created before M1-CP4 have no key pair yet.
+
+### 6.4 Test keys (`tests/conftest.py`)
+
+Making an RSA-3072 key takes about a second, so tests get their keys from a
+small pool of three REAL, DIFFERENT RSA keys, built lazily once per pytest
+session. The counter starts again in every test: the first key made in a test
+is pool key 1, the second key 2, the third key 3, then it wraps to key 1.
+**Only the first three users of one test are guaranteed to have different key
+pairs; the fourth gets the same key pair as the first.** Every private key is
+still encrypted for real with its own user's password. A test that needs a
+freshly generated key asks for the `real_keygen` fixture. Tests that check
+"a third user can not use A's package" must keep their users within the first
+three of the test (the shared fixtures A, B and C of M1-CP6 will).
+
+### 6.5 Planned (not implemented yet)
+
+- `ensure_user_key(user, password)` at login, for accounts that have no key
+  pair yet (M1-CP5).
+- Shared test fixtures for a requester (A), an owner (B) and a third user (C),
+  each with a valid `user_key` (M1-CP6).
 
 ## 7. Out of scope
 
