@@ -1,4 +1,4 @@
-# Cryptography Assignment 1: core module (authentication, database, authorization)
+# Cryptography Assignments 1 and 2: core module (authentication, database, authorization, encrypted storage, key sharing tables)
 
 A Flask + SQLite + SQLAlchemy web application designed to store personal data,
 ID card (KTP) images, documents (PDF/DOC/XLS) and videos in encrypted form
@@ -94,8 +94,43 @@ be opened again.
 python init_db.py
 ```
 
-Creates the `user`, `stored_file` and `cipher_copy` tables and the storage folder.
-Safe to rerun: existing data is not modified.
+Creates the tables (`user`, `stored_file`, `cipher_copy`, and for key sharing
+`user_key`, `access_request`, `shared_copy`) and the storage folder. Safe to
+rerun: it only creates what is missing and never changes existing tables or
+data. After pulling Assignment 2, run it again: the three new tables are added
+and your existing data stays as it is (there is no need to delete
+`instance/app.db`).
+
+## Key sharing tables (Assignment 2)
+
+The three key sharing tables are described in full in `docs/sharing-design.md`
+(the table contract and the access helpers).
+
+| Table | Holds | Key material |
+| --- | --- | --- |
+| `user_key` | one row per user: the public key and the private key | public key (PEM); the private key is stored encrypted with the user's own password (scrypt, AES-256-CBC); old accounts get it at their next login |
+| `access_request` | a request from one user for another user's data, with its status (`pending`, `approved`, `rejected`) | wrapped share key and key package; empty until a request is approved |
+| `shared_copy` | one extra encrypted copy of a file for one request | nonce; the ciphertext itself is a file on disk, not in the database |
+
+Rules the database enforces:
+
+- A requester can have only one `pending` request per owner.
+- A user cannot request their own data.
+- `status` can only be `pending`, `approved` or `rejected`.
+- Deleting a user, a file or a request removes the rows that depend on it. The
+  ciphertext files on disk are not removed by this cascade; `delete_record` in
+  `app/storage/services.py` removes the files of one record. There is no
+  user-deletion route or service.
+
+`app/authz.py` also has the requester-side helpers `get_requested_or_404` and
+`requested_select`. They check who made the request, not its status.
+
+Current status: the tables, their rules and these helpers exist, and
+registering a new account now creates its key pair (RSA-3072; the private key
+is encrypted with the account's password, see `docs/sharing-design.md`).
+Accounts created before that get their key pair at their next successful
+login. No code creates requests or
+shared copies, and there are no sharing routes or pages; those are planned.
 
 ## Running
 
@@ -111,8 +146,11 @@ python run.py --port 8001
 ```
 
 Port 5000 is deliberately not the default because on macOS it is often used by
-the AirPlay Receiver service. Available pages: `/` (placeholder page),
-`/auth/register`, `/auth/login` and `/auth/logout`.
+the AirPlay Receiver service. Available pages: `/` (a landing page when
+signed out, a temporary storage test page when signed in), `/auth/register`,
+`/auth/login` and `/auth/logout`. The signed-in page uses the endpoints under
+`/storage/` (list, upload, personal data create/show/update, view, download,
+comparison, delete).
 
 ## Running the tests
 
@@ -120,7 +158,7 @@ the AirPlay Receiver service. Available pages: `/` (placeholder page),
 python -m pytest -q
 ```
 
-`pytest.ini` turns every warning into an error. Latest result on macOS: 958
+`pytest.ini` turns every warning into an error. Latest result on macOS: 1400
 tests passed. Style check (optional, not in `requirements.txt`):
 `pip install flake8`, then `flake8 app tests`.
 
@@ -130,22 +168,30 @@ tests passed. Style check (optional, not in `requirements.txt`):
 app/
   __init__.py          application factory (create_app), Flask-Login, CSRF, session cookie
   config.py            reading and validating .env (ConfigError if invalid)
-  models.py            User, StoredFile, CipherCopy
+  models.py            User, StoredFile, CipherCopy, UserKey, AccessRequest, SharedCopy
   database.py          creating tables and the storage folder (init_db)
   db_pragmas.py        PRAGMA foreign_keys on every SQLite connection
   extensions.py        SQLAlchemy db object
-  authz.py             get_owned_or_404, owned_select (data ownership)
+  authz.py             get_owned_or_404, owned_select (data ownership);
+                       get_requested_or_404, requested_select (requester side)
   security_headers.py  security headers, CSP, Cache-Control
   request_limits.py    16 KiB body limit for /auth/*
-  placeholder.py       placeholder page "/"
+  placeholder.py       page "/": landing page (signed out) or storage test page (signed in)
   auth/                services (Argon2id), forms, routes, throttle, redirects
-  templates/           base.html, placeholder_home.html, auth/login.html, auth/register.html
+  crypto/              AES/DES/RC4 engine, per-copy keys, user RSA key pair (asymmetric.py)
+  storage/             upload, download and delete service, ciphertext files on disk, routes under /storage/
+  templates/           base.html, landing.html, placeholder_home.html, auth/login.html, auth/register.html
+  static/              css, js and images for the pages
 docs/
   auth-integration.md  guide for other members (protecting routes, CSRF, uploads, CSP)
   data-model.md        data model design and explanation
-tests/                 automated tests (pytest)
+  sharing-design.md    key sharing tables and access helpers (Assignment 2)
+  Conversation With AI_*  conversation records (PDF and ZIP files)
+tests/                 automated tests (pytest); shared fixtures for the sharing tests: tests/sharing_fixtures.py
 init_db.py             creates the tables and the storage folder
 run.py                 development server entry point
+design.md              design specification of the web interface
+crypto_benchmark.csv   benchmark results (default output of tests/test_crypto_performance.py)
 ```
 
 ## Security summary (implemented and tested)
@@ -169,9 +215,12 @@ run.py                 development server entry point
 - **Body size:** `/auth/*` is limited to 16 KiB (413 if larger); other routes
   follow `MAX_UPLOAD_MB`.
 - **Access control:** a user's data can only be accessed by its owner through
-  `get_owned_or_404`; data owned by someone else and data that does not exist
-  both return 404. An inventory test checks every route in `app.url_map` (each
-  must require login and a CSRF token).
+  `get_owned_or_404` and `owned_select` (every `/storage/` route that reads,
+  changes or deletes a record goes through them); data owned by someone else
+  and data that does not exist both return 404. An inventory test checks every
+  route in `app.url_map` (static files aside): every route outside the public
+  ones (`/`, `/auth/login`, `/auth/register`) must require login, and every
+  route that changes state must refuse a missing or wrong CSRF token.
 - **Secrets:** `.env`, `instance/` and `*.db` files are ignored by Git; tests
   scan responses and logs for passwords, hashes and keys.
 
@@ -210,15 +259,20 @@ yet).
 13. Usernames are ASCII only, and the common-password list is small. [T]
 14. The application does not keep an audit log (no log of failed logins or
     429s). [K]
-15. The schema is created with `create_all()` without migrations; changing the
-    schema means recreating the database. [K]
+15. The schema is created with `create_all()` without migrations. Adding a new
+    table needs no reset (`init_db.py` creates what is missing); changing the
+    columns of an existing table means recreating the database. [K]
 16. Design: DES and RC4 are weak; all three copies contain the same plaintext,
     so data confidentiality is only as strong as the weakest copy; whoever holds
-    `.env` and the database can open all data. The encryption module is not yet
-    in this branch. [K]
+    `.env` and the database can open all data. [K]
 17. The mutation figures in the report were run in a sandbox by an AI assistant
     and have not been reproduced on macOS. [M]
 18. Only Python 3.9 has been tested. [M]
+19. `stored_file.plaintext_sha256` holds an unsalted SHA-256 of the plaintext in
+    the database, so whoever has the database can test guesses of low-entropy
+    data. `init_db.py` also refuses a database whose `stored_file` table was
+    created without that column ("Table 'stored_file' already exists with
+    different columns"); delete `instance/app.db` and run it again. [K]
 
 ## Team roles
 

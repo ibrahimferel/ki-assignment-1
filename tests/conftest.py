@@ -6,13 +6,80 @@ tests can not affect each other and nothing is written to the real
 """
 
 import secrets
+import threading
 
 import pytest
 
 from app import create_app
 from app.config import TestingConfig
+from app.crypto import asymmetric
 from app.extensions import db
 from app.models import CipherCopy, StoredFile, User
+
+# Fixtures for the key-sharing tests (users A, B, C and more): see
+# tests/sharing_fixtures.py. Imported here so every test file can use them.
+from sharing_fixtures import (  # noqa: F401  (pytest finds fixtures by name)
+    login_as,
+    make_request,
+    make_trio,
+    owner_records,
+    trio,
+    web_owner_records,
+    web_trio,
+)
+
+# --------------------------------------------------------------------------
+# RSA keys for tests
+#
+# Registering a user makes an RSA-3072 key pair, which takes about a second.
+# To keep the suite fast, every test gets keys from a small pool of REAL,
+# DIFFERENT RSA keys. The pool is built lazily, once per pytest session.
+#
+# The counter starts again in every test: the first key made in a test is
+# pool key 1, the second is key 2, the third is key 3, and after that it
+# wraps around to key 1. So only the FIRST THREE users of one test are
+# guaranteed to have different key pairs; the fourth gets the same key pair
+# as the first. The private key is still encrypted for real, with each user's
+# own password. Ask for the ``real_keygen`` fixture to opt out and get a
+# freshly generated key every time.
+# --------------------------------------------------------------------------
+
+_KEY_POOL_SIZE = 3
+_REAL_GENERATE_RSA_KEY = asymmetric._generate_rsa_key
+_key_pool = []
+_key_pool_lock = threading.Lock()
+
+
+@pytest.fixture(autouse=True)
+def _pooled_rsa_keys(request, monkeypatch):
+    """Swap the slow RSA generation for the pool (see the block above)."""
+    if "real_keygen" in request.fixturenames:
+        return
+    counter = [0]
+
+    def next_key():
+        with _key_pool_lock:
+            index = counter[0] % _KEY_POOL_SIZE
+            counter[0] += 1
+            while len(_key_pool) <= index:
+                _key_pool.append(_REAL_GENERATE_RSA_KEY())
+            return _key_pool[index]
+
+    monkeypatch.setattr(asymmetric, "_generate_rsa_key", next_key)
+
+
+@pytest.fixture()
+def real_keygen():
+    """Ask for this fixture to get a freshly generated RSA key every time.
+
+    It does nothing by itself: ``_pooled_rsa_keys`` looks for its name.
+    """
+
+
+@pytest.fixture()
+def rsa_key_pool():
+    """The pool of RSA keys created so far (it fills up lazily)."""
+    return _key_pool
 
 
 @pytest.fixture()

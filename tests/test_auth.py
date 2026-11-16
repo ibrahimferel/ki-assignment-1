@@ -105,6 +105,12 @@ def test_username_max_matches_the_column():
 def test_public_names_are_exported():
     expected = {
         "AuthError",
+        "KEY_CHECK_FAILED",
+        "KEY_CREATED",
+        "KEY_KEYGEN_FAILED",
+        "KEY_PRESENT",
+        "KEY_SAVE_FAILED",
+        "KeyGenerationError",
         "PASSWORD_MAX",
         "PASSWORD_MIN",
         "PasswordPolicyError",
@@ -113,6 +119,7 @@ def test_public_names_are_exported():
         "UsernamePolicyError",
         "UsernameTakenError",
         "authenticate",
+        "ensure_user_key",
         "get_user",
         "hash_password",
         "normalize_username",
