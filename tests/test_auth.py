@@ -105,6 +105,7 @@ def test_username_max_matches_the_column():
 def test_public_names_are_exported():
     expected = {
         "AuthError",
+        "KeyGenerationError",
         "PASSWORD_MAX",
         "PASSWORD_MIN",
         "PasswordPolicyError",

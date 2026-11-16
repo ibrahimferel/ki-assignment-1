@@ -37,6 +37,7 @@ from app.auth.services import (
     PASSWORD_MIN,
     USERNAME_MAX,
     USERNAME_MIN,
+    KeyGenerationError,
     PasswordPolicyError,
     UsernamePolicyError,
     UsernameTakenError,
@@ -120,6 +121,18 @@ def register():
             form.username.errors.append(error.message)
         except PasswordPolicyError as error:
             form.password.errors.append(error.message)
+        except KeyGenerationError as error:
+            # A failure on our side, not a mistake by the user: show the form
+            # again with a fixed message and nothing else.
+            return (
+                render_template(
+                    "auth/register.html",
+                    form=form,
+                    limits=_limits(),
+                    error=error.message,
+                ),
+                500,
+            )
         else:
             flash("Account created. You can log in now.", "success")
             return redirect(url_for("auth.login"))

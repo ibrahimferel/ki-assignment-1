@@ -15,6 +15,8 @@ Design decisions (see the CP5 plan):
 * ``authenticate`` returns ``None`` for every kind of failure and always
   spends one hash verification, so neither the answer nor the timing says
   whether the username exists.
+* ``register_user`` also makes the user's RSA key pair
+  (``app.crypto.asymmetric``) and saves it with the user in one commit.
 
 This module never logs and never prints. Error messages are fixed texts that
 do not contain user input.
@@ -30,11 +32,14 @@ from argon2.exceptions import InvalidHashError, VerificationError
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
+from app.crypto.asymmetric import generate_user_keypair
+from app.crypto.errors import CryptoError
 from app.extensions import db
-from app.models import User
+from app.models import User, UserKey
 
 __all__ = [
     "AuthError",
+    "KeyGenerationError",
     "PASSWORD_MAX",
     "PASSWORD_MIN",
     "PasswordPolicyError",
@@ -111,6 +116,7 @@ _MESSAGES = {
     ),
     "password_same_as_username": "Password must not be the username.",
     "password_too_common": "Password is too common.",
+    "key_generation_failed": "Could not create the account. Please try again.",
 }
 
 
@@ -137,6 +143,13 @@ class UsernameTakenError(AuthError):
 
     def __init__(self):
         super().__init__("username_taken")
+
+
+class KeyGenerationError(AuthError):
+    """The key pair of a new account could not be made; nothing was saved."""
+
+    def __init__(self):
+        super().__init__("key_generation_failed")
 
 
 # Created once. Constructing it does no hashing.
@@ -255,14 +268,31 @@ def _dummy_credentials():
 
 
 def register_user(username, password):
-    """Create, save and return a new ``User``.
+    """Create, save and return a new ``User`` together with its key pair.
 
-    Raises ``UsernamePolicyError``, ``PasswordPolicyError`` or
-    ``UsernameTakenError``. Commits the session.
+    Raises ``UsernamePolicyError``, ``PasswordPolicyError``,
+    ``UsernameTakenError`` or ``KeyGenerationError``. The user and the key
+    pair are saved in one commit; when anything fails, neither is saved.
     """
     name = normalize_username(username)
     validate_password(password, name)
-    user = User(username=name, password_hash=hash_password(password))
+    password_hash = hash_password(password)
+    # The key pair is made before the database is touched, so a failure here
+    # leaves nothing behind.
+    try:
+        public_pem, encrypted_private_pem = generate_user_keypair(password)
+    except CryptoError:
+        key_failed = True
+    else:
+        key_failed = False
+    if key_failed:
+        # Outside the ``except`` block, like UsernameTakenError below: no
+        # ``__context__`` is left behind.
+        raise KeyGenerationError()
+    user = User(username=name, password_hash=password_hash)
+    user.key = UserKey(
+        public_key_pem=public_pem, encrypted_private_key=encrypted_private_pem
+    )
     db.session.add(user)
     try:
         db.session.commit()
