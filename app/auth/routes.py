@@ -9,6 +9,9 @@ Rules these routes follow:
   protection into "basic" mode. The 2-hour limit still applies.
 * Logout is POST-only, so a link or an image can not log anyone out.
 * ``next`` is only followed when ``safe_next_url`` accepts it.
+* A successful login also gives an account that has no key pair one (see
+  ``ensure_user_key``). A failure there is logged and never blocks the
+  login; the next login tries again.
 * Auth pages are sent with ``Cache-Control: no-store``.
 * Login and registration attempts are counted before any password work is
   done (see ``app.auth.throttle``). A refused attempt gets status 429 with a
@@ -37,11 +40,15 @@ from app.auth.services import (
     PASSWORD_MIN,
     USERNAME_MAX,
     USERNAME_MIN,
+    KEY_CHECK_FAILED,
+    KEY_KEYGEN_FAILED,
+    KEY_SAVE_FAILED,
     KeyGenerationError,
     PasswordPolicyError,
     UsernamePolicyError,
     UsernameTakenError,
     authenticate,
+    ensure_user_key,
     normalize_username,
     register_user,
 )
@@ -51,6 +58,7 @@ __all__ = ["LOGIN_FAILED", "auth_bp"]
 
 LOGIN_FAILED = "Invalid username or password."
 TOO_MANY_ATTEMPTS = "Too many attempts. Please try again later."
+_KEY_FAILURES = (KEY_CHECK_FAILED, KEY_KEYGEN_FAILED, KEY_SAVE_FAILED)
 
 auth_bp = Blueprint("auth", __name__, url_prefix="/auth")
 
@@ -159,6 +167,16 @@ def login():
         user = authenticate(_text(form.username), _text(form.password))
         if user is not None:
             _throttle().login_succeeded(decision.ticket)
+            user_id = user.id
+            outcome = ensure_user_key(user, _text(form.password))
+            if outcome in _KEY_FAILURES:
+                # Only the id and the reason: no password, key or error text.
+                current_app.logger.warning(
+                    "Could not create the key pair of user %d at login (%s);"
+                    " it will be tried again at the next login.",
+                    user_id,
+                    outcome,
+                )
             session.clear()  # nothing from before the login survives
             login_user(user, remember=False)
             return redirect(next_url or url_for("main.index"))

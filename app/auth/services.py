@@ -17,6 +17,9 @@ Design decisions (see the CP5 plan):
   whether the username exists.
 * ``register_user`` also makes the user's RSA key pair
   (``app.crypto.asymmetric``) and saves it with the user in one commit.
+* ``ensure_user_key`` gives an account that has no key pair one, at its next
+  successful login. Nothing about the key pair or the database can make it
+  raise; it returns one of the ``KEY_*`` texts instead.
 
 This module never logs and never prints. Error messages are fixed texts that
 do not contain user input.
@@ -30,7 +33,7 @@ import unicodedata
 from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerificationError
 from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from app.crypto.asymmetric import generate_user_keypair
 from app.crypto.errors import CryptoError
@@ -39,6 +42,11 @@ from app.models import User, UserKey
 
 __all__ = [
     "AuthError",
+    "KEY_CHECK_FAILED",
+    "KEY_CREATED",
+    "KEY_KEYGEN_FAILED",
+    "KEY_PRESENT",
+    "KEY_SAVE_FAILED",
     "KeyGenerationError",
     "PASSWORD_MAX",
     "PASSWORD_MIN",
@@ -48,6 +56,7 @@ __all__ = [
     "UsernamePolicyError",
     "UsernameTakenError",
     "authenticate",
+    "ensure_user_key",
     "get_user",
     "hash_password",
     "normalize_username",
@@ -60,6 +69,13 @@ USERNAME_MIN = 3
 USERNAME_MAX = 32  # must equal the width of the ``user.username`` column
 PASSWORD_MIN = 10
 PASSWORD_MAX = 128
+
+# What ``ensure_user_key`` returns.
+KEY_PRESENT = "present"  # the account already has a key pair
+KEY_CREATED = "created"  # a key pair was made and saved just now
+KEY_KEYGEN_FAILED = "keygen_failed"  # the key pair could not be made
+KEY_SAVE_FAILED = "save_failed"  # the key pair could not be saved
+KEY_CHECK_FAILED = "check_failed"  # the database could not be asked
 
 # NFKC can shrink a string (a base letter plus combining marks becomes one
 # character) but never by anywhere near this factor. Longer raw input is
@@ -312,6 +328,79 @@ def register_user(username, password):
     # carries the password hash in its parameters and must not stay
     # reachable through ``__context__``.
     raise UsernameTakenError()
+
+
+def _rollback():
+    """Roll the session back; a failing rollback is not worth a 500."""
+    try:
+        db.session.rollback()
+    except SQLAlchemyError:
+        pass
+
+
+def _has_key(user_id):
+    """True or False; ``None`` when the database could not be asked."""
+    try:
+        return db.session.get(UserKey, user_id) is not None
+    except SQLAlchemyError:
+        _rollback()
+        return None
+
+
+def ensure_user_key(user, password):
+    """Give ``user`` a key pair if the account has none; return a ``KEY_*``.
+
+    For accounts that were made before key pairs existed. Call it after the
+    password was verified (``authenticate``), with that same password. It
+    checks the password again, with the same NFKC normalization as
+    ``authenticate``, but only when it is about to make a key pair: a key
+    pair encrypted with a wrong password could never be opened and, once
+    saved, would never be replaced.
+
+    Raises ``TypeError`` for arguments of the wrong type and ``ValueError`` for
+    an unsaved user or a password that does not match the account. A key pair
+    that can not be made, a database that can not be asked or written, and a
+    lost race all become return values; only ``CryptoError`` and
+    ``SQLAlchemyError`` are caught, anything else is a bug and propagates.
+
+    When two logins race, the primary key of ``user_key`` lets exactly one
+    insert win; the other one rolls back and reports ``KEY_PRESENT``.
+    """
+    if not isinstance(user, User):
+        raise TypeError("user must be a User")
+    _require_str(password, "password")
+    user_id = user.id
+    if user_id is None:
+        raise ValueError("user has no id yet; save it first")
+
+    found = _has_key(user_id)
+    if found is None:
+        return KEY_CHECK_FAILED
+    if found:
+        return KEY_PRESENT
+
+    if not verify_password(user.password_hash, password):
+        raise ValueError("password does not match this account")
+    try:
+        public_pem, encrypted_private_pem = generate_user_keypair(password)
+    except CryptoError:
+        return KEY_KEYGEN_FAILED
+    db.session.add(
+        UserKey(
+            user_id=user_id,
+            public_key_pem=public_pem,
+            encrypted_private_key=encrypted_private_pem,
+        )
+    )
+    try:
+        db.session.commit()
+    except SQLAlchemyError:
+        _rollback()
+        # Most likely another login made the key pair first: use that one.
+        if _has_key(user_id):
+            return KEY_PRESENT
+        return KEY_SAVE_FAILED
+    return KEY_CREATED
 
 
 def authenticate(username, password):
