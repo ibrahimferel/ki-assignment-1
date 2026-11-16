@@ -16,6 +16,18 @@ from app.crypto import asymmetric
 from app.extensions import db
 from app.models import CipherCopy, StoredFile, User
 
+# Fixtures for the key-sharing tests (users A, B, C and more): see
+# tests/sharing_fixtures.py. Imported here so every test file can use them.
+from sharing_fixtures import (  # noqa: F401  (pytest finds fixtures by name)
+    login_as,
+    make_request,
+    make_trio,
+    owner_records,
+    trio,
+    web_owner_records,
+    web_trio,
+)
+
 # --------------------------------------------------------------------------
 # RSA keys for tests
 #
