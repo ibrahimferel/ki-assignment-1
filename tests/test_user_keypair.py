@@ -114,7 +114,7 @@ def trace_text(error):
 
 
 def test_the_module_exports_only_the_one_function():
-    assert asymmetric.__all__ == ["generate_user_keypair"]
+    assert asymmetric.__all__ == ["generate_user_keypair","encrypt_for_user","decrypt_with_password"]
     public = [
         name
         for name, value in vars(asymmetric).items()
@@ -122,13 +122,11 @@ def test_the_module_exports_only_the_one_function():
         and inspect.isfunction(value)
         and value.__module__ == asymmetric.__name__
     ]
-    assert public == ["generate_user_keypair"]
+    assert public == ["generate_user_keypair","encrypt_for_user","decrypt_with_password"]
 
 
 def test_none_of_the_other_contract_functions_exist_here():
     others = (
-        "encrypt_for_user",
-        "decrypt_with_password",
         "new_share_key",
         "encrypt_shared",
         "decrypt_shared",
@@ -155,7 +153,7 @@ def test_source_never_logs_prints_or_asserts():
             imported.update(a.name for a in node.names)
         elif isinstance(node, ast.ImportFrom):
             imported.add(node.module)
-    assert imported == {"unicodedata", "Crypto.PublicKey", "app.crypto.errors"}
+    assert imported == {"unicodedata", "Crypto.PublicKey","Crypto.Cipher", "Crypto.Hash", "app.crypto.errors"}
 
 
 def test_the_key_size_and_exponent_are_pinned():

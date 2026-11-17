@@ -1,7 +1,9 @@
-"""The key pair of one user (Assignment 2, contract 1).
+"""The key pair of one user, and RSA-OAEP with it (Assignment 2, contract 1).
 
-This module holds exactly one public function, ``generate_user_keypair``.
-The other functions of the key sharing contract belong to Member 2.
+This module holds three public functions. ``generate_user_keypair``
+(Member 1) makes the key pair; ``encrypt_for_user`` and
+``decrypt_with_password`` (Member 2) use it for RSA-OAEP. The symmetric half
+of key sharing (share key, AES-GCM, key package) is in ``app.crypto.share``.
 
 What is produced
 ----------------
@@ -18,6 +20,25 @@ version would use by default, but below what OWASP currently recommends for
 scrypt (N = 2**17). Raising it later is possible only when every reader of
 these keys can open the larger value.
 
+RSA-OAEP with the key pair
+--------------------------
+``encrypt_for_user`` and ``decrypt_with_password`` carry the 32-byte share
+key K of one access request to the requester inside the key package (see
+``app.crypto.share``):
+
+* OAEP with SHA-256 and MGF1-SHA-256. ``hashAlgo`` is always passed, because
+  pycryptodome's default would be SHA-1;
+* the OAEP label is the request id (``app.crypto.share.oaep_label``), so a
+  ciphertext made for one request does not decrypt under the label of
+  another request;
+* only 3072-bit keys are accepted: the ciphertext is always 384 bytes and the
+  plaintext at most 318 bytes (384 - 2 * 32 - 2);
+* ``decrypt_with_password`` opens the private key with the same password
+  steps that ``generate_user_keypair`` uses (see "The password" below).
+
+Only pycryptodome is imported here. The tests check the OAEP output in both
+directions against ``cryptography``.
+
 The password
 ------------
 The password is normalized with NFKC and encoded as UTF-8 here, the same
@@ -26,19 +47,32 @@ password that logs in also opens this key. Whoever opens the private key
 later must apply exactly the same two steps. pycryptodome would turn a
 ``str`` passphrase into latin-1 bytes; this module always passes bytes.
 
+Errors
+------
+Every failure raises ``CryptoError`` with a fixed message, raised outside
+any ``except`` block, so no library error (which may carry key material)
+stays reachable through ``__context__``. Each OAEP function uses a single
+message for all of its failures, so the caller can not tell which check
+failed: a wrong password, a wrong label and a damaged ciphertext look the same.
+
 This module never logs and never prints. Error messages are fixed texts that
 do not contain the password or any key material.
 """
 
 import unicodedata
 
+from Crypto.Cipher import PKCS1_OAEP
+from Crypto.Hash import SHA256
 from Crypto.PublicKey import RSA
-
 from app.crypto.errors import CryptoError
 
-__all__ = ["generate_user_keypair"]
+__all__ = ["generate_user_keypair","encrypt_for_user","decrypt_with_password"]
 
 RSA_BITS = 3072
+_OAEP_CIPHERTEXT_BYTES = RSA_BITS // 8
+_OAEP_MAX_PLAINTEXT_BYTES = _OAEP_CIPHERTEXT_BYTES - 2 * SHA256.digest_size - 2
+_OAEP_ENCRYPT_FAILED = "Could not encrypt the message for the user"
+_OAEP_DECRYPT_FAILED = "Could not decrypt the message with the password"
 RSA_EXPONENT = 65537
 
 # Parameters of the protection of the private key (see the module docstring).
@@ -111,3 +145,57 @@ def generate_user_keypair(password):
     # may carry key material and must not stay reachable through
     # ``__context__``.
     raise CryptoError(failure)
+
+def _password_to_bytes(password):
+    """Turn a typed password into bytes exactly as ``generate_user_keypair`` does.
+
+    NFKC, then UTF-8. Returns ``None`` for anything that is not a ``str`` of
+    at most ``_PASSWORD_LIMIT`` (1024) characters, or that can not be encoded
+    (a lone surrogate). An empty password gives ``b""``, which
+    ``decrypt_with_password`` refuses, as ``generate_user_keypair`` does.
+    """
+    if isinstance(password, str) and len(password) <= _PASSWORD_LIMIT:
+        try:
+            return unicodedata.normalize("NFKC", password).encode("utf-8")
+        except UnicodeEncodeError:  # a lone surrogate
+            pass
+    return None
+
+def encrypt_for_user(public_pem, data, label) -> bytes:
+    ciphertext = None
+    if (
+        isinstance(data, bytes)
+        and isinstance(label, bytes)
+        and len(data) <= _OAEP_MAX_PLAINTEXT_BYTES
+    ):
+        try:
+            key = RSA.import_key(public_pem)
+            if not key.has_private() and key.size_in_bits() == RSA_BITS:
+                cipher = PKCS1_OAEP.new(key, hashAlgo=SHA256, label=label)
+                ciphertext = cipher.encrypt(data)
+        except Exception:  # noqa: BLE001 - any failure becomes CryptoError
+            ciphertext = None
+    if ciphertext is None:  # outside the except block: no __context__
+        raise CryptoError(_OAEP_ENCRYPT_FAILED)
+    return ciphertext
+
+
+def decrypt_with_password(encrypted_private_pem, password, ciphertext, label) -> bytes:
+    plaintext = None
+    passphrase = _password_to_bytes(password)
+    if (
+        passphrase
+        and isinstance(ciphertext, bytes)
+        and len(ciphertext) == _OAEP_CIPHERTEXT_BYTES   # exactly 384, not <= 318
+        and isinstance(label, bytes)
+    ):
+        try:
+            key = RSA.import_key(encrypted_private_pem, passphrase=passphrase)
+            if key.has_private() and key.size_in_bits() == RSA_BITS:
+                cipher = PKCS1_OAEP.new(key, hashAlgo=SHA256, label=label)
+                plaintext = cipher.decrypt(ciphertext)
+        except Exception:  # noqa: BLE001
+            plaintext = None
+    if plaintext is None:
+        raise CryptoError(_OAEP_DECRYPT_FAILED)
+    return plaintext
