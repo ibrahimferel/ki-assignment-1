@@ -101,11 +101,9 @@ data. After pulling Assignment 2, run it again: the three new tables are added
 and your existing data stays as it is (there is no need to delete
 `instance/app.db`).
 
-If `access_request` already exists with only three allowed statuses, stop the
-application and run `python migrate_sharing_status.py instance/app.db` before
-using sharing. This explicit upgrade creates a backup, preserves existing rows
-and shared copies, and adds `revoked` to the constraint. `init_db.py` does not
-alter existing tables. A newly initialized database already has this constraint.
+New databases support the `revoked` sharing status. `init_db.py` creates missing
+tables without altering existing ones; migration from older schemas is not
+supported.
 
 ## Key sharing tables (Assignment 2)
 

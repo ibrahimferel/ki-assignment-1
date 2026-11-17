@@ -1,247 +1,204 @@
-# Sharing API — handoff Member 3 ke Member 4
+# Sharing frontend handoff: Member 3 → Member 4
 
-Panduan ini mengikuti [acuan Member 3](acuan_member3.md),
-[routes](../app/sharing/routes.py), [services](../app/sharing/services.py),
-[validation](../app/sharing/validation.py), dan
-[tes integrasi](../tests/test_sharing_routes.py). Contoh ID, nama, dan waktu
-di bawah bersifat ilustratif; `...` pada paket bukan paket yang valid.
+**Task for Member 4** build the sharing UI against the
+existing Flask backend described below. Extend the current Flask/Jinja frontend
+and reuse its login, storage UI patterns, and styling. Keep the API contracts intact.
 
-## 1. Authentication dan CSRF
+## 1. Existing implementation
 
-- Gunakan frontend dengan origin yang sama dengan Flask. Autentikasi memakai
-  cookie session dari form `/auth/login`; tidak ada Bearer token/API login JSON.
-- Seluruh endpoint sharing wajib login. Tanpa login, respons normal adalah
-  `302` ke `/auth/login?next=...`. `fetch` mengikuti redirect dan dapat menerima
-  HTML login dengan status akhir `200`; periksa `response.redirected`.
-- Setiap POST memerlukan `X-CSRFToken`. Ambil dari
-  `input[name="csrf_token"]` pada halaman aktif; halaman `/` setelah login
-  sudah menyediakan input ini melalui form logout. Tidak ada endpoint CSRF khusus.
-- Login mengosongkan session lama. Ambil token baru setelah login/reload;
-  token milik session lain tidak berlaku. POST tanpa CSRF dapat mendapat `400`
-  sebelum pemeriksaan login berjalan.
-- POST dengan payload memakai `Content-Type: application/json`.
-  GET dan POST reject/revoke tidak memerlukan body.
+Member 3 has implemented and tested the backend:
 
-## 2. Endpoint Contract 3
+| Code | Responsibility |
+|---|---|
+| [`app/sharing/routes.py`](../app/sharing/routes.py) | Sharing HTTP endpoints and responses |
+| [`app/sharing/services.py`](../app/sharing/services.py) | Request lifecycle, selected-file sharing, key packages, expiry, unlock, revocation |
+| [`app/sharing/validation.py`](../app/sharing/validation.py) | JSON validation and input limits |
+| [`app/crypto/share.py`](../app/crypto/share.py) | Server-side sharing cryptography |
+| [`app/storage/routes.py`](../app/storage/routes.py) | Owner's file list for the approval picker |
+| [`tests/test_sharing_routes.py`](../tests/test_sharing_routes.py) | API behavior and integration tests |
 
-`id` adalah ID access request; `file_id` adalah ID record owner.
-Semua path di bawah tanpa trailing slash. Requester = pengaju akses;
-owner = pemilik data yang diminta. Peran berlaku per request, bukan per akun.
+The existing vault page is [`app/templates/placeholder_home.html`](../app/templates/placeholder_home.html),
+served at `/` after login. Its JS is [`app/static/js/storage.js`](../app/static/js/storage.js).
+Sharing pages are still to be implemented. Add the sharing UI to the vault or
+create a linked, authenticated Jinja page with external JS/CSS.
 
-| Method dan path | Aktor | Body JSON | Respons sukses |
+## 2. Member 4 requirements
+
+Requester and owner are roles **per request**; one account can act as both.
+
+| UI to build | Required behavior |
+|---|---|
+| Request access form | Submit the owner's username and a reason. Show validation and success feedback. |
+| Incoming / outgoing lists | Load both lists; show counterpart username, reason, status, and dates. Include loading, empty, and error states. |
+| Owner approval picker | Load the owner's records from `GET /storage/`; select specific files and approve. Offer Reject for pending requests. |
+| Owner key-package panel | Show the full package after approval with a copy button. Allow retrieval again while the share is active. The owner sends it manually outside the app. |
+| Requester unlock form | Accept the received package and the **requester's own account password**. Show shared files only after a successful unlock. |
+| Shared-file panel | Provide downloads, JPG/PNG previews, and a personal-data viewer. Display share expiry and unlock deadline. |
+| Owner revocation | Offer Revoke for approved requests; refresh the lists after success. |
+
+Refresh request lists after create/approve/reject/revoke. Disable action buttons
+while submitting. Catch network errors and avoid automatic POST retries: the
+server may already have committed the action.
+
+## 3. Authentication and request setup
+
+- Use the same origin as Flask and cookie sessions from `/auth/login`.
+- All sharing endpoints require login. Unauthenticated requests normally redirect
+  to login (`302`); `fetch` follows redirects and may return login HTML with `200`.
+  Check `response.redirected` before parsing the body.
+- Every POST needs `X-CSRFToken`, read from `input[name="csrf_token"]` on the
+  current page. The signed-in vault already includes it in the logout form.
+  For a new Jinja page, include a hidden input with `value="{{ csrf_token() }}"`.
+  Get a fresh token after login/reload; there is no CSRF token endpoint.
+- Send JSON bodies with `Content-Type: application/json` and
+  `credentials: "same-origin"`. Reject/revoke need no body.
+- Put JS/CSS in external static files; the page CSP blocks inline scripts/styles.
+
+Example call from an external JS file; apply the response handling in section 6:
+
+```javascript
+const response = await fetch("/sharing/requests", {
+  method: "POST",
+  credentials: "same-origin",
+  headers: {
+    "Content-Type": "application/json",
+    "X-CSRFToken": document.querySelector('input[name="csrf_token"]').value,
+  },
+  body: JSON.stringify({ username: "owner-b", reason: "Medical review" }),
+});
+```
+
+## 4. API contract
+
+Base path: `/sharing/requests`. No trailing slash. `id` is an access-request ID;
+`file_id` is an owner's stored-record ID, not a shared-copy ID.
+
+| Method / path | Role | JSON body | Success |
 |---|---|---|---|
-| `POST /sharing/requests` | Requester | `{"username":"owner-b","reason":"Keperluan pemeriksaan"}` | `201 {"id":1}` |
-| `GET /sharing/requests` | Keduanya | — | `200 {"incoming":[...],"outgoing":[...]}` |
+| `POST /sharing/requests` | Requester | `{"username":"owner-b","reason":"Medical review"}` | `201 {"id":1}` |
+| `GET /sharing/requests` | Both | — | `200 {"incoming":[],"outgoing":[]}` |
 | `POST /sharing/requests/<id>/approve` | Owner | `{"file_ids":[2,4]}` | `200 {"key_package":"..."}` |
 | `GET /sharing/requests/<id>/key-package` | Owner | — | `200 {"key_package":"..."}` |
-| `POST /sharing/requests/<id>/reject` | Owner | — | `204`, body kosong |
-| `POST /sharing/requests/<id>/revoke` | Owner | — | `204`, body kosong |
-| `POST /sharing/requests/<id>/unlock` | Requester | `{"key_package":"...","password":"password akun requester"}` | `200 {"files":[...],"unlocked_until":"..."}` |
-| `GET /sharing/requests/<id>/files/<file_id>/download` | Requester | — | `200`, attachment; MIME `application/octet-stream`; nama dari original |
-| `GET /sharing/requests/<id>/files/<file_id>/view` | Requester | — | `200`, inline `image/jpeg` atau `image/png` |
-| `GET /sharing/requests/<id>/files/<file_id>/personal` | Requester | — | `200`, objek JSON data pribadi |
+| `POST /sharing/requests/<id>/reject` | Owner | — | `204`, empty body |
+| `POST /sharing/requests/<id>/revoke` | Owner | — | `204`, empty body |
+| `POST /sharing/requests/<id>/unlock` | Requester | `{"key_package":"...","password":"requester password"}` | `200`, unlock response below |
+| `GET /sharing/requests/<id>/files/<file_id>/download` | Requester | — | Attachment, `application/octet-stream`, original filename |
+| `GET /sharing/requests/<id>/files/<file_id>/view` | Requester | — | Inline `image/jpeg` or `image/png` |
+| `GET /sharing/requests/<id>/files/<file_id>/personal` | Requester | — | Personal-data JSON below |
 
-Ketiga endpoint file memerlukan request approved, belum expired, sudah
-di-unlock dan window unlock masih berlaku, serta file termasuk pilihan approve.
-Resource yang tidak tersedia/tidak berwenang menghasilkan `404`.
+### Response shapes
 
-### Bentuk daftar request
+Each incoming/outgoing entry has this shape (example values):
 
 ```json
 {
-  "incoming": [],
-  "outgoing": [
-    {
-      "id": 1,
-      "username": "owner-b",
-      "reason": "Keperluan pemeriksaan",
-      "status": "approved",
-      "created_at": "2026-11-17T08:00:00Z",
-      "decided_at": "2026-11-17T09:00:00Z",
-      "expires_at": "2026-11-24T09:00:00Z"
-    }
-  ]
+  "id": 1,
+  "username": "owner-b",
+  "reason": "Medical review",
+  "status": "approved",
+  "created_at": "2026-11-17T08:00:00Z",
+  "decided_at": "2026-11-17T09:00:00Z",
+  "expires_at": "2026-11-24T09:00:00Z"
 }
 ```
 
-- `incoming`: request dengan user aktif sebagai owner; `username` adalah requester.
-  `outgoing`: user aktif sebagai requester; `username` adalah owner.
-- Kedua list diurutkan ID menurun; list kosong berupa `[]`.
-- Status hanya `pending`, `approved`, `rejected`, `revoked`. `decided_at` bernilai
-  `null` ketika pending; `expires_at` bernilai `null` jika status bukan approved.
-- Timestamp berupa ISO 8601 UTC dengan akhiran `Z`, dapat memuat mikrodetik.
-- Listing tidak mengirim file, jumlah/ukuran file, atau key package,
-  termasuk setelah approved. Daftar file berasal dari respons unlock.
+`incoming` means the current user is owner; `username` identifies the requester.
+`outgoing` means the current user is requester; `username` identifies the owner.
+Both lists use descending request ID. Status is `pending`, `approved`, `rejected`,
+or `revoked`. `decided_at` is null while pending; `expires_at` is null unless
+approved. Dates are UTC ISO 8601 ending in `Z`, optionally with microseconds.
+Listing contains **no files, key package, or unlock deadline**.
 
-### Respons unlock dan personal
+The approval picker uses `GET /storage/`:
+
+```json
+{"items":[{"id":2,"name":"id-card.png","kind":"id_card","size":12345}]}
+```
+
+Successful unlock returns:
 
 ```json
 {
   "files": [
     {"id":2,"name":"id-card.png","kind":"id_card","content_type":"image/png","size":12345},
-    {"id":4,"name":"document.pdf","kind":"document","content_type":"application/pdf","size":67890}
+    {"id":4,"name":"report.pdf","kind":"document","content_type":"application/pdf","size":67890}
   ],
   "unlocked_until": "2026-11-17T09:15:00Z"
 }
 ```
 
-`size` adalah metadata ukuran plaintext dalam byte. `files` diurutkan ID file
-menaik dan hanya memuat shared copy yang masih ada. Gunakan ID ini untuk
-membentuk URL sharing; respons tidak memuat URL atau plaintext key.
-
-`GET .../personal` hanya untuk `kind: "personal_data"`, dengan bentuk:
+Files use ascending file ID; `size` is plaintext bytes. Kinds are `id_card`,
+`document`, `video`, and `personal_data`. Build sharing URLs using these IDs.
+`GET .../personal` only accepts `personal_data` and returns:
 
 ```json
-{
-  "nama": "Pemilik B",
-  "nik": "0000000000000001",
-  "alamat": "Jalan Contoh 1",
-  "tanggal_lahir": "1990-01-01"
-}
+{"nama":"Owner B","nik":"0000000000000001","alamat":"Example Street 1","tanggal_lahir":"1990-01-01"}
 ```
 
-`view` hanya menerima MIME JPG/PNG. Gunakan `<img src="URL_VIEW">` atau buka
-URL di tab baru; jangan iframe/object karena `X-Frame-Options: DENY` dan CSP.
-Respons view memakai `sandbox; default-src 'none'; img-src 'self'`.
-Gunakan link biasa untuk download. Respons non-static memakai `Cache-Control: no-store`.
+Keep these field names unchanged. Render user text with `textContent`.
+Use `<img src="SHARING_VIEW_URL">` for JPG/PNG and normal links for downloads.
+Other formats use download; iframe/object previews are blocked by security headers.
 
-## 3. Validasi dan alur UI
+## 5. Validation and access rules
 
-1. **Requester mengajukan:** username dinormalisasi trim/lowercase, ASCII 3–32
-   karakter `a-z`, angka, `.`, `_`, `-`, diawali/diakhiri huruf atau angka.
-   Reason di-trim, wajib tidak kosong, maksimal 500 karakter. Self-request dan
-   duplikat pending pasangan yang sama ditolak `400`; username tidak ditemukan `404`.
-2. **Kedua pihak melihat daftar:** gunakan incoming/outgoing. Jangan menampilkan
-   metadata file owner kepada requester sebelum approval.
-3. **Owner memilih file:** ambil `GET /storage/`, yang mengembalikan
-   `{"items":[{"id":4,"name":"document.pdf","kind":"document","size":67890}]}`.
-   Kirim ID pilihan secara eksplisit saat approve: 1–100 integer unik,
-   rentang `1..2^63-1`, bukan string/bool. Semua file harus milik owner.
-   Owner juga dapat reject request pending; sesudah keputusan, refresh daftar.
-4. **Owner approve:** hanya pending. Backend membuat salinan terenkripsi terpisah
-   dan mengembalikan paket RSA. Tampilkan sebagai teks untuk disalin utuh dan
-   dikirim manual melalui kanal lain, misalnya WhatsApp/email. Backend tidak
-   mengirim pesan tersebut. Owner dapat mengambil ulang paket selama share aktif
-   melalui GET key-package; requester tidak dapat memakai endpoint ini.
-5. **Requester unlock:** kirim paket utuh dan password akun requester, bukan
-   password owner. Paket maksimal 2048 karakter; password string maksimal 1024
-   karakter mentah. Jangan trim/mengubah password; normalisasi dilakukan backend.
-   Paket/password kosong mencapai tahap crypto dan menghasilkan `422` pada share aktif.
-   Setelah sukses, render `files` dan deadline dari respons.
-6. **Requester membaca:** gunakan hanya URL `/sharing/...` untuk download/view/personal.
-   URL `/storage/<id>/...` owner tetap ditolak bagi requester. Untuk personal data,
-   tampilkan teks memakai `textContent`, bukan menyisipkan isi JSON sebagai HTML.
-7. **Owner revoke:** hanya approved dengan kunci yang masih tersedia; hasil `204`.
-   Backend menyimpan `revoked`, menghapus shared copy dan membatalkan unlock/paket.
-   Refresh daftar; requester kehilangan akses, termasuk jika sebelumnya sudah unlock.
+- **Create:** username is trimmed/lowercased; 3–32 ASCII characters (`a-z`, digits,
+  `.`, `_`, `-`), starting/ending with a letter or digit. Reason is trimmed,
+  required, and at most 500 characters. Self-requests and duplicate pending
+  requests in the same direction return `400`; unknown usernames return `404`.
+- **Approve/reject:** pending requests only. Approval requires 1–100 unique integer
+  file IDs (`1..2^63-1`), all owned by the approver. Strings/bools are invalid IDs.
+  Repeating a decision returns `400`. A new request is allowed once the previous
+  request is no longer pending.
+- **Key package:** opaque text, copied in full and transferred manually (e.g.,
+  WhatsApp/email). Only the owner can retrieve it. Backend sends no messages.
+- **Unlock:** package ≤2048 characters; password ≤1024 raw characters. Send both
+  as strings. Do not trim/change the password. Empty strings reach cryptographic
+  validation and return `422` on an active share.
+- **Expiry:** share lasts 7 days from approval; unlock lasts 15 minutes from a
+  successful unlock. Every file read checks both deadlines. An expired share
+  still has status `approved`; use `expires_at` to display expiry.
+- **Re-unlock:** allowed while the share is active. Reloading the page loses the
+  frontend file list/deadline; the requester can unlock again. Unlock state is
+  stored per request, not per browser.
+- **Revoke:** approved requests with an available share key only; repeating it
+  returns `400`. Revocation removes shared copies and invalidates package/unlock
+  access. Previously downloaded files cannot be withdrawn.
+- **File access:** always use `/sharing/...` for requester reads. Owner `/storage/...`
+  URLs remain inaccessible. Unselected files, wrong roles, inactive shares, and
+  missing/expired unlocks return `404`.
 
-Approve/reject ulang pada request non-pending dan revoke ulang ditolak `400`.
-Request baru boleh dibuat setelah request sebelumnya approved/rejected/revoked;
-aturan unik hanya mencakup pending dengan arah requester–owner yang sama.
+Approval creates encrypted content snapshots; later original edits do not update
+them. Deleting an original removes its shared copies. The frontend needs no RSA/AES
+implementation and receives no plaintext share key. Never persist passwords in
+URLs, logs, cookies, localStorage, or sessionStorage; clear the password field after use.
 
-## 4. Error handling
+## 6. Frontend error handling
 
-| Status | Penyebab aktual | Tindakan frontend |
-|---|---|---|
-| `302` | Login diperlukan; fetch dapat berakhir pada HTML `200` | Deteksi redirect, arahkan ke login dan ambil CSRF baru sesudahnya |
-| `400` | Payload/tipe/batas panjang salah, state tidak mengizinkan aksi, duplicate/self-request; requester belum punya keypair saat approve; atau CSRF gagal | Tampilkan pesan validasi; untuk CSRF, muat ulang halaman/login bila perlu |
-| `404` | Resource hilang, peran salah, file bukan pilihan/milik owner, share tidak aktif/expired, belum unlock/window habis; view/personal tidak sesuai tipe | Jangan mencoba URL original; refresh daftar dan cek deadline, tawarkan unlock ulang jika share masih aktif |
-| `422` | Password/paket salah, ID/label/kunci paket tidak cocok, keypair requester hilang saat unlock, ciphertext/JSON personal gagal dibaca | Tampilkan pesan generik; minta input ulang, jangan tampilkan exception internal |
-| `429` | Unlock dibatasi | Baca `Retry-After` dalam detik dan tunda percobaan berikutnya |
-| `413` | Melebihi limit body global `MAX_CONTENT_LENGTH` (default 50 MiB) | Tolak input terlalu besar; respons dapat berupa HTML |
-| `500` | Kegagalan server yang tidak ditangani, misalnya I/O/DB | Tampilkan pesan umum; refresh state sebelum mengulang POST |
+| Response | Required handling |
+|---|---|
+| Login redirect | Navigate to login; obtain fresh CSRF after login. |
+| `400` | Show validation/state feedback. CSRF errors may require reload/login. |
+| `404` | Refresh state; offer re-unlock only if the share is still active. Never fall back to owner URLs. |
+| `422` | Show a generic decryption/input error; allow package/password correction. |
+| `429` | Disable unlock retries for `Retry-After` seconds. Default: five failed attempts per user/request in 15 minutes; success resets the count. |
+| `413` / `500` | Show a general size/server error; refresh state before retrying a POST. |
+| `204` | Success with no body; do not call `response.json()`. |
 
-Error dari validator berupa `{"error":"pesan validasi"}`. Error crypto adalah
-`{"error":"Data tidak dapat didekripsi"}`; throttle
-`{"error":"Terlalu banyak percobaan"}`. File fisik hilang dapat memberi
-`{"error":"Tidak ditemukan"}`. `abort(404)` dan error CSRF memakai HTML bawaan;
-**jangan menganggap semua error JSON atau membedakan resource asing dari yang hilang**.
-Tidak ada `409` pada implementasi sharing saat ini. `204` tidak boleh diparse sebagai JSON.
+Check `Content-Type` before parsing JSON: CSRF, `abort(404)`, and other errors can
+return HTML. JSON errors use `{"error":"..."}`; existing messages may be Indonesian.
+Do not depend on exact message text. There is no sharing `409` response.
 
-## 5. Contoh fetch
+## 7. Member 4 acceptance checklist
 
-Letakkan JS di file statis eksternal; CSP halaman menolak inline script.
-Helper ini untuk respons JSON/204, bukan file biner. Pesan error aplikasi
-ditampilkan sebagai teks dan tidak perlu mencatat request body/password.
+- [ ] Requester A can request access to owner B; both see the correct list entry.
+- [ ] B selects two of three records; approval produces a copyable package.
+- [ ] A unlocks with that package and A's password; only the two selected records appear.
+- [ ] Downloads, image previews, and personal-data display use sharing endpoints.
+- [ ] Reject/revoke refresh the UI; revoked access fails even after a prior unlock.
+- [ ] Expiry, re-unlock, wrong password/package, `429`, login redirect, and CSRF errors have usable feedback.
+- [ ] No password persistence, inline scripts, or assumed endpoints/response fields.
 
-```javascript
-async function sharingJSON(path, { method = "GET", body } = {}) {
-  const headers = { Accept: "application/json" };
-  if (method === "POST") {
-    const token = document.querySelector('input[name="csrf_token"]')?.value;
-    if (!token) throw new Error("Muat ulang halaman untuk memperoleh token CSRF.");
-    headers["X-CSRFToken"] = token;
-  }
-  if (body !== undefined) headers["Content-Type"] = "application/json";
-
-  const response = await fetch(path, {
-    method, headers, credentials: "same-origin",
-    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-  });
-  if (response.redirected) {
-    window.location.assign("/auth/login");
-    throw new Error("Login kembali untuk melanjutkan.");
-  }
-  if (response.status === 204) return null;
-
-  const isJSON = (response.headers.get("Content-Type") || "").includes("application/json");
-  const data = isJSON ? await response.json() : null;
-  if (!response.ok) {
-    const message = data?.error || (response.status === 400
-      ? "Permintaan ditolak; muat ulang halaman untuk memperbarui CSRF."
-      : `HTTP ${response.status}`);
-    const error = new Error(message);
-    error.status = response.status;
-    error.retryAfter = Number(response.headers.get("Retry-After") || 0);
-    throw error;
-  }
-  if (!isJSON) throw new Error("Respons JSON tidak tersedia.");
-  return data;
-}
-
-// Panggil sesuai peran/session; requestId dan input berasal dari UI/respons API.
-const sendRequest = (username, reason) => sharingJSON("/sharing/requests", {
-  method: "POST", body: { username, reason },
-});
-const listRequests = () => sharingJSON("/sharing/requests");
-const approve = (requestId, fileIds) => sharingJSON(`/sharing/requests/${requestId}/approve`, {
-  method: "POST", body: { file_ids: fileIds },
-});
-const unlock = (requestId, keyPackage, password) => sharingJSON(`/sharing/requests/${requestId}/unlock`, {
-  method: "POST", body: { key_package: keyPackage, password },
-});
-const revoke = (requestId) => sharingJSON(`/sharing/requests/${requestId}/revoke`, { method: "POST" });
-const personal = (requestId, fileId) => sharingJSON(`/sharing/requests/${requestId}/files/${fileId}/personal`);
-```
-
-Tangkap rejection dengan `try/catch` pada event handler. Error dengan `status: 429`
-menyediakan `retryAfter`; kegagalan jaringan dari `fetch` juga masuk `catch`.
-Jangan otomatis retry POST setelah koneksi terputus: aksi server mungkin sudah commit.
-
-## 6. Batasan yang perlu diketahui Member 4
-
-- Share berlaku 7 hari dari approval; unlock 15 menit dari unlock sukses.
-  Akses harus memenuhi **kedua** deadline. Expiry/unlock bukan status tambahan;
-  request expired tetap berstatus approved, jadi periksa `expires_at` juga.
-  Share aktif dengan window habis dapat di-unlock ulang; expired/revoked perlu request baru.
-- Limiter default mengizinkan lima percobaan unlock dalam 15 menit per pasangan
-  user/request; setelah lima kegagalan, percobaan keenam `429`. Sukses mereset
-  hitungan. Limiter berada di memori per aplikasi/proses dan tidak dibagi antar-worker.
-- Tidak ada pagination, pencarian username, notifikasi, endpoint daftar file sharing
-  terpisah, atau edit pilihan file setelah approval. Pada reload, listing tidak
-  mengembalikan metadata/deadline unlock; API unlock dapat dipanggil ulang oleh requester.
-- Shared ciphertext adalah snapshot saat approval; perubahan original tidak
-  otomatis memperbaruinya. Penghapusan original menghapus shared copy terkait.
-  Expiry menolak akses tetapi tidak otomatis menghapus ciphertext.
-- Unlock berlaku per request, bukan per browser. Revoke tidak dapat menarik
-  kembali file yang sudah diunduh. Jangan simpan password ke URL, log, cookie,
-  localStorage atau sessionStorage; backend melakukan dekripsi, frontend tidak
-  perlu mengimplementasikan RSA/AES atau menerima plaintext share key.
-- Instalasi dengan database tiga-status lama harus menjalankan
-  [migrasi status](../migrate_sharing_status.py) sebelum memakai revoke; lihat
-  [README](../README.md). Database baru sudah mendukung status revoked.
-
-Referensi perilaku yang telah diuji: [sharing routes](../tests/test_sharing_routes.py),
-[crypto sharing](../tests/test_share_crypto.py),
-[auth routes](../tests/test_auth_routes.py), dan
-[security inventory](../tests/test_security_inventory.py).
+No separate shared-file listing, notifications, username search, server pagination,
+or editing file selection after approval exists. Use the endpoints above.
+Validate backend compatibility with `python -m pytest tests/test_sharing_routes.py`;
+verify the UI flow manually using two accounts.
