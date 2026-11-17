@@ -101,6 +101,12 @@ data. After pulling Assignment 2, run it again: the three new tables are added
 and your existing data stays as it is (there is no need to delete
 `instance/app.db`).
 
+If `access_request` already exists with only three allowed statuses, stop the
+application and run `python migrate_sharing_status.py instance/app.db` before
+using sharing. This explicit upgrade creates a backup, preserves existing rows
+and shared copies, and adds `revoked` to the constraint. `init_db.py` does not
+alter existing tables. A newly initialized database already has this constraint.
+
 ## Key sharing tables (Assignment 2)
 
 The three key sharing tables are described in full in `docs/sharing-design.md`
@@ -109,14 +115,14 @@ The three key sharing tables are described in full in `docs/sharing-design.md`
 | Table | Holds | Key material |
 | --- | --- | --- |
 | `user_key` | one row per user: the public key and the private key | public key (PEM); the private key is stored encrypted with the user's own password (scrypt, AES-256-CBC); old accounts get it at their next login |
-| `access_request` | a request from one user for another user's data, with its status (`pending`, `approved`, `rejected`) | wrapped share key and key package; empty until a request is approved |
+| `access_request` | a request from one user for another user's data, with its status (`pending`, `approved`, `rejected`, `revoked`) | wrapped share key and key package; empty until a request is approved |
 | `shared_copy` | one extra encrypted copy of a file for one request | nonce; the ciphertext itself is a file on disk, not in the database |
 
 Rules the database enforces:
 
 - A requester can have only one `pending` request per owner.
 - A user cannot request their own data.
-- `status` can only be `pending`, `approved` or `rejected`.
+- `status` can only be `pending`, `approved`, `rejected` or `revoked`.
 - Deleting a user, a file or a request removes the rows that depend on it. The
   ciphertext files on disk are not removed by this cascade; `delete_record` in
   `app/storage/services.py` removes the files of one record. There is no
@@ -129,8 +135,9 @@ Current status: the tables, their rules and these helpers exist, and
 registering a new account now creates its key pair (RSA-3072; the private key
 is encrypted with the account's password, see `docs/sharing-design.md`).
 Accounts created before that get their key pair at their next successful
-login. No code creates requests or
-shared copies, and there are no sharing routes or pages; those are planned.
+login. The `/sharing` JSON API creates requests, approves selected files,
+distributes an RSA-encrypted key package to the owner, unlocks shared copies,
+and supports rejection and revocation. Sharing pages are a separate frontend task.
 
 ## Running
 
