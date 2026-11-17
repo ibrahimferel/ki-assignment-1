@@ -1032,6 +1032,7 @@ def test_the_sharing_names_are_exported():
         "pending",
         "approved",
         "rejected",
+        "revoked",
     )
 
 
@@ -1169,7 +1170,7 @@ def test_database_refuses_invalid_requests(pair, changes):
     assert_rejected(INSERT_REQUEST, row)
 
 
-@pytest.mark.parametrize("status", ["pending", "approved", "rejected"])
+@pytest.mark.parametrize("status", ["pending", "approved", "rejected", "revoked"])
 def test_every_documented_status_is_accepted(pair, status):
     execute(INSERT_REQUEST, request_row(pair[0].id, pair[1].id, status=status))
     assert count("access_request") == 1

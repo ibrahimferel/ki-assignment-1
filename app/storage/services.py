@@ -154,6 +154,7 @@ def update_personal_record(stored, payload):
 def delete_record(stored):
     """Hapus metadata, commit, kemudian cleanup ciphertext."""
     names = [c.storage_name for c in stored.copies]
+    names.extend(c.storage_name for c in stored.shared_copies)
     try:
         db.session.delete(stored)
         db.session.commit()

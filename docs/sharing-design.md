@@ -77,7 +77,7 @@ Both key columns are `bytes`, as returned by `generate_user_keypair`.
 | `id` | integer, PK | automatic |
 | `requester_id` | integer | NOT NULL; FK `user.id`, CASCADE; indexed |
 | `owner_id` | integer | NOT NULL; FK `user.id`, CASCADE; indexed |
-| `status` | string(16) | NOT NULL; `pending`, `approved` or `rejected`; ORM default `pending` |
+| `status` | string(16) | NOT NULL; `pending`, `approved`, `rejected` or `revoked`; ORM default `pending` |
 | `reason` | string(500) | NOT NULL |
 | `created_at` | datetime | NOT NULL, filled by the application |
 | `decided_at` | datetime | NULL until the owner decides |
@@ -87,7 +87,7 @@ Both key columns are `bytes`, as returned by `generate_user_keypair`.
 
 Constraints:
 
-- `ck_access_request_status`: status is one of the three values.
+- `ck_access_request_status`: status is one of the four values.
 - `ck_access_request_distinct_users`: `requester_id != owner_id`.
 - `uq_access_request_pending_pair`: a **partial unique index** on
   (`requester_id`, `owner_id`) `WHERE status = 'pending'`: at most one pending
@@ -146,8 +146,11 @@ lookups by `request_id`. `storage_name` must match the same pattern as
   insert must give it.
 - `reason` is limited to 500 characters by validation (Member 3), not by
   SQLite, which does not enforce `VARCHAR` length.
-- No migrations: the three tables are final once pushed. A later column change
-  forces everyone to delete their database file.
+- `init_db.py` creates missing tables without altering existing ones. For the
+  older three-status constraint, stop the application and run
+  `python migrate_sharing_status.py instance/app.db`; the command backs up and
+  upgrades the table without resetting data. Other schema changes need their
+  own migration.
 - A private-key check must look for the **plain** markers (`BEGIN PRIVATE KEY`,
   `BEGIN RSA PRIVATE KEY`). An encrypted PKCS#8 document starts with
   `BEGIN ENCRYPTED PRIVATE KEY`, so searching for "PRIVATE KEY" alone matches

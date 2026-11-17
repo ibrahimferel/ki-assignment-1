@@ -41,7 +41,7 @@ KINDS = ("personal_data", "id_card", "document", "video")
 BLOCK_ALGORITHMS = ("AES", "DES")  # need a mode and an IV
 STREAM_ALGORITHMS = ("RC4",)  # no mode, no IV
 ALGORITHMS = BLOCK_ALGORITHMS + STREAM_ALGORITHMS
-REQUEST_STATUSES = ("pending", "approved", "rejected")
+REQUEST_STATUSES = ("pending", "approved", "rejected", "revoked")
 
 # Random file names only: no dots and no slashes, so path tricks are
 # impossible by construction.

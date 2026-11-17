@@ -78,10 +78,10 @@ def create_app(config_object: Optional[object] = None) -> Flask:
     from app.auth.routes import auth_bp
     from app.auth.throttle import Throttle
     from app.placeholder import main_bp
+    from app.sharing import sharing_bp
     from app.storage.routes import storage_bp
     from app.request_limits import register_auth_body_limit
     from app.security_headers import register_security_headers
-    from app.storage.routes import storage_bp
 
 
     # One limiter per application: its counts live in this process only.
@@ -89,6 +89,7 @@ def create_app(config_object: Optional[object] = None) -> Flask:
     app.register_blueprint(auth_bp)
     app.register_blueprint(main_bp)
     app.register_blueprint(storage_bp)
+    app.register_blueprint(sharing_bp)
     login_manager.login_view = "auth.login"
     login_manager.login_message = "Please log in to continue."
     login_manager.login_message_category = "info"
