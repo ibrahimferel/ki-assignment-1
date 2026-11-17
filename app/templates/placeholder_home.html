@@ -9,7 +9,7 @@
 <div class="vault-frame" id="vault" data-index-url="{{ url_for('storage.index') }}" data-upload-url="{{ url_for('storage.upload') }}" data-personal-url="{{ url_for('storage.create_personal') }}" data-max-request="{{ config.MAX_CONTENT_LENGTH }}">
   <header class="vault-header container">
     <a class="brand" href="{{ url_for('main.index') }}"><span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 32 32" fill="none"><path d="M4 17h6l3-7 5 13 3-6h7" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"/></svg></span><span>medvault<span class="accent">.</span></span></a>
-    <nav aria-label="Your vault"><a href="#upload">Upload</a><a href="#records-section">Your records</a><a href="#personal">Personal data</a></nav>
+    <nav aria-label="Your vault"><a href="#upload">Upload</a><a href="#records-section">Your records</a><a href="#personal">Personal data</a><a href="{{ url_for('main.sharing_page') }}">Sharing</a></nav>
     <form method="post" action="{{ url_for('auth.logout') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="logout" type="submit">Log out <span aria-hidden="true">&#8599;</span></button></form>
   </header>
   <div class="container vault-content">

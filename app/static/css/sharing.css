@@ -1,0 +1,112 @@
+/* Sharing page. Builds on storage.css (frame, panels, buttons, dialogs). */
+
+.vault-content .workspace-grid + .shared-panel { margin-top: 24px; }
+
+.list-heading {
+  margin: 28px 0 6px;
+  font-size: 18px;
+  letter-spacing: -.02em;
+}
+.list-heading small { color: #aabbb9; font-size: 12px; font-weight: 400; margin-left: 8px; }
+
+.form-status.field-error, .field-error { color: #ffb4b4; }
+
+/* ---- request rows ---- */
+.request-item { align-items: flex-start; }
+.request-top { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.request-reason { overflow-wrap: anywhere; line-height: 1.5; }
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 0 10px;
+  border: 1px solid #344340;
+  border-radius: 8px;
+  font-size: 10px;
+  font-weight: 750;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: #cbd8d6;
+}
+.badge-pending { border-color: #8a7a35; background: #2c2810; color: #f3e08a; }
+.badge-approved { border-color: #2f7f5a; background: #11301f; color: #7ff0ae; }
+.badge-rejected, .badge-revoked { border-color: #a65454; background: #351d20; color: #ffb4b4; }
+.badge-expired { border-color: #5b6b69; background: #1b2423; color: #b7c3c5; }
+
+.button.small { min-height: 40px; padding: 0 16px; }
+.record-actions .button.small, .record-actions .danger-button { white-space: nowrap; }
+
+/* ---- dialogs ---- */
+dialog.wide { width: min(640px, calc(100% - 32px)); }
+dialog label { display: block; margin: 18px 0 8px; font-size: 13px; font-weight: 650; }
+dialog textarea,
+dialog input:not([type=file]):not([type=checkbox]) {
+  width: 100%;
+  min-height: 48px;
+  padding: 11px 13px;
+  border: 1px solid #657d82;
+  border-radius: 10px;
+  background: #0c1415;
+  color: #f4f7f7;
+}
+dialog textarea { resize: vertical; }
+.package-text {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+dialog .field-hint { font-size: 12px; line-height: 1.5; color: #adbfbc; margin: 8px 0 0; }
+.dialog-error { color: #ffb4b4; min-height: 1.4em; margin: 14px 0 0; }
+.dialog-actions { flex-wrap: wrap; }
+dialog .primary.button { min-height: 44px; }
+
+.file-link {
+  display: inline-block !important;
+  margin: 10px 0 0 !important;
+  color: #75e6d4;
+  font-weight: 700 !important;
+  cursor: pointer;
+  text-decoration: underline;
+}
+.file-input:focus-visible + label,
+.file-input:focus-visible ~ .file-link { outline: 2px solid #38bdf8; outline-offset: 3px; }
+
+/* ---- approval picker ---- */
+.picker { border: 1px solid var(--border); border-radius: 12px; padding: 8px 16px; margin: 16px 0 0; }
+.picker legend { padding: 0 8px; font-size: 12px; font-weight: 700; color: #bfcecb; }
+.check-list { list-style: none; margin: 0; padding: 0; max-height: 280px; overflow-y: auto; }
+.check-row { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-top: 1px solid var(--border); }
+.check-row:first-child { border-top: 0; }
+.check-row input { width: 20px !important; min-height: 20px !important; accent-color: #2dd4bf; flex: none; }
+.check-row label { margin: 0; display: flex; flex-direction: column; gap: 4px; cursor: pointer; min-width: 0; }
+.check-row strong { overflow-wrap: anywhere; font-size: 14px; }
+.check-row small { color: #aabbb9; font-size: 12px; font-weight: 400; }
+
+/* ---- shared files ---- */
+.deadlines { display: flex; flex-wrap: wrap; gap: 24px; margin: 0 0 16px; }
+.deadlines div { display: flex; flex-direction: column; gap: 4px; }
+.deadlines dt { font-size: 10px; letter-spacing: .1em; font-weight: 700; color: #aebfbc; text-transform: uppercase; }
+.deadlines dd { margin: 0; font-size: 14px; }
+.shared-item { flex-direction: column; align-items: stretch; }
+.shared-row { display: flex; justify-content: space-between; align-items: center; gap: 16px; }
+.shared-preview {
+  max-width: min(100%, 520px);
+  max-height: 360px;
+  object-fit: contain;
+  align-self: flex-start;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: #0c1415;
+}
+.shared-personal { margin: 0; padding: 16px; border: 1px solid var(--border); border-radius: 12px; background: #0c1415; }
+.shared-personal dt { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: #aebfbc; margin-top: 10px; }
+.shared-personal dt:first-child { margin-top: 0; }
+.shared-personal dd { margin: 4px 0 0; overflow-wrap: anywhere; }
+
+@media (max-width: 650px) {
+  .shared-row { flex-direction: column; align-items: flex-start; }
+  .request-item { gap: 12px; }
+  .dialog-actions button { flex: 1 1 auto; }
+}

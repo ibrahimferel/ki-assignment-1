@@ -133,6 +133,7 @@ def test_the_route_table_is_exactly_the_documented_one(site):
     }
     assert rules == {
         ("/", ("GET",)),
+        ("/sharing", ("GET",)),
         ("/auth/login", ("GET", "POST")),
         ("/auth/register", ("GET", "POST")),
         ("/auth/logout", ("POST",)),
