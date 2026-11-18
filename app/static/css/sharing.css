@@ -1,6 +1,13 @@
 /* Sharing page. Builds on storage.css (frame, panels, buttons, dialogs). */
 
-.vault-content .workspace-grid + .shared-panel { margin-top: 24px; }
+.sharing-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 24px;
+  align-items: start;
+  margin-top: 32px;
+}
+.welcome .subtle-button { white-space: nowrap; }
 
 .list-heading {
   margin: 28px 0 6px;
@@ -12,9 +19,36 @@
 .form-status.field-error, .field-error { color: #ffb4b4; }
 
 /* ---- request rows ---- */
-.request-item { align-items: flex-start; }
+.list-summary { margin: 0 0 12px !important; font-size: 13px !important; color: #cfe0dc !important; }
+.request-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px 20px;
+  padding: 20px 0;
+}
+.request-item .record-meta { gap: 8px; }
 .request-top { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
-.request-reason { overflow-wrap: anywhere; line-height: 1.5; }
+.request-name { font-size: 17px !important; }
+.request-reason { margin: 0 !important; font-size: 14px !important; line-height: 1.5; color: #e1ebe9 !important; overflow-wrap: anywhere; }
+.request-dates { line-height: 1.5; }
+.request-item .record-actions { flex-wrap: nowrap; align-items: center; }
+.request-item .record-actions button { min-height: 40px; padding: 0 16px; white-space: nowrap; }
+.request-item .record-actions:empty { display: none; }
+
+.past-requests { margin-top: 12px; border-top: 1px solid var(--border); }
+.past-requests > summary {
+  cursor: pointer;
+  padding: 16px 0;
+  font-size: 13px;
+  font-weight: 650;
+  color: #b7c3c5;
+  list-style: none;
+}
+.past-requests > summary::-webkit-details-marker { display: none; }
+.past-requests > summary::before { content: "\25B8"; display: inline-block; margin-right: 8px; color: var(--teal); }
+.past-requests[open] > summary::before { content: "\25BE"; }
+.past-requests .request-item { opacity: .8; }
 
 .badge {
   display: inline-flex;
@@ -84,7 +118,12 @@ dialog .primary.button { min-height: 44px; }
 .check-row strong { overflow-wrap: anywhere; font-size: 14px; }
 .check-row small { color: #aabbb9; font-size: 12px; font-weight: 400; }
 
-/* ---- shared files ---- */
+/* ---- shared files dialog ---- */
+dialog.files-dialog { width: min(780px, calc(100% - 32px)); max-height: 90vh; overflow-y: auto; }
+.dialog-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
+.dialog-head h2 { margin: 14px 0 6px; }
+.dialog-head p { margin: 0 0 18px; }
+.request-unlocked { color: #7ff0ae !important; }
 .deadlines { display: flex; flex-wrap: wrap; gap: 24px; margin: 0 0 16px; }
 .deadlines div { display: flex; flex-direction: column; gap: 4px; }
 .deadlines dt { font-size: 10px; letter-spacing: .1em; font-weight: 700; color: #aebfbc; text-transform: uppercase; }
@@ -105,8 +144,13 @@ dialog .primary.button { min-height: 44px; }
 .shared-personal dt:first-child { margin-top: 0; }
 .shared-personal dd { margin: 4px 0 0; overflow-wrap: anywhere; }
 
+@media (max-width: 1000px) {
+  .sharing-grid { grid-template-columns: 1fr; }
+}
+
 @media (max-width: 650px) {
+  .request-item { grid-template-columns: 1fr; }
+  .request-item .record-actions { flex-wrap: wrap; }
   .shared-row { flex-direction: column; align-items: flex-start; }
-  .request-item { gap: 12px; }
   .dialog-actions button { flex: 1 1 auto; }
 }

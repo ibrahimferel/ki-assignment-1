@@ -25,6 +25,7 @@ sharing JavaScript and CSS apart from `storage.js`.
 | `app/static/css/sharing.css` | new | Styles for the new parts. Reuses `storage.css` for frame, panels, buttons, dialogs. |
 | `app/placeholder.py` | changed | Added the `GET /sharing` page route (`main.sharing_page`, `@login_required`). |
 | `app/templates/placeholder_home.html` | changed | One nav link, "Sharing", in the vault header. |
+| `scripts/seed_sharing_demo.py` | new | Creates synthetic demo users, records and requests in every state (section 11). |
 | `tests/test_sharing_page.py` | new | 4 tests for the page shell (see section 6). |
 | `tests/test_auth_routes.py` | changed | Added `("/sharing", ("GET",))` to the pinned route table. |
 | `project.md` | new | The Member 4 plan and reference (written earlier). |
@@ -46,6 +47,18 @@ The CSRF token comes from the logout form in the page header
 (`<input name="csrf_token" value="{{ csrf_token() }}">`); `sharing.js` reads it
 at the time of each POST.
 
+### Layout (revised after first review)
+
+Two separate panels side by side (stacked under 1000 px): **YOU ASK** on the
+left (the request form, then "Your requests", where Unlock lives) and **ASKED OF
+YOU** on the right (Incoming requests, where Approve, Reject and Revoke live).
+Each list puts requests that still need action first (pending, then active
+shares) and moves finished ones (rejected, revoked, expired) into a collapsed
+"Past requests (n)" section. A one-line summary above each list says what needs
+attention, for example "2 requests are waiting for your decision". The first
+version put both lists in one long panel, which buried Outgoing and mixed
+finished requests with live ones.
+
 ## 4. What the page contains (and which requirement it covers)
 
 | Component | Element(s) | Behaviour |
@@ -55,7 +68,7 @@ at the time of each POST.
 | Owner approval picker | `#approve-dialog` | Loads the owner's records from `GET /storage/` into a checklist, all ticked by default. Blocks sending when none are ticked (and over 100). Sends `{file_ids}`. |
 | Key-package panel | `#package-dialog` | Read-only box with the full package, **Copy package**, **Download .txt**. Reopened later with **Show key package** (`GET .../key-package`). Hint text says only what is true: the text is encrypted and only the requester can open it with their password. |
 | Requester unlock form | `#unlock-dialog` | Paste the package, or choose a `.txt` file (`FileReader`). Password field (`type=password`) for the requester's own account password. |
-| Shared-file panel | `#shared-panel` | Appears only after a successful unlock. Per file: Download link, JPG/PNG `<img>` preview, personal-data "View details". Shows share expiry and a live unlock countdown. |
+| Shared-files popup | `#shared-dialog` | A popup (not a panel at the bottom of the page) opened after a successful unlock. Per file: Download link, JPG/PNG `<img>` preview, personal-data "View details". Shows share expiry and a live unlock countdown. While the unlock window is open, the request row in "Your requests" shows **View files** (reopens the popup with no password) and **Unlock again**; after the window ends it goes back to **Unlock**. |
 | Owner revoke | `#revoke-dialog` | Confirmation (states that downloaded files cannot be withdrawn), then `POST .../revoke`. |
 
 ### Button matrix (what the lists show)
@@ -63,7 +76,7 @@ at the time of each POST.
 | Status | Incoming (I am owner) | Outgoing (I am requester) |
 |---|---|---|
 | pending | Approve, Reject | none |
-| approved, active | Show key package, Revoke | Unlock |
+| approved, active | Show key package, Revoke | Unlock; or View files + Unlock again while the 15-minute unlock window is open |
 | approved, past `expires_at` | none (badge "expired") | none (badge "expired") |
 | rejected / revoked | none | none |
 
@@ -94,11 +107,13 @@ Everything is inside one function scope; no globals. Main parts:
   cleared in a `finally` block after every attempt. The package field is
   cleared when the dialog closes. On `429` the Unlock button is disabled for
   `Retry-After` seconds with a countdown; this lock lives in memory only.
-- **Shared files**: `showShared()` builds the file list. A one-second timer
-  updates the unlock countdown. When the 15-minute window or the 7-day share
-  ends, `lockShared()` empties the panel (removing the preview images) and says
-  why. After every list refresh the panel also checks that the request is still
-  active, so a revoke is noticed.
+- **Shared files**: the unlock response is kept in memory in a map keyed by
+  request id (`unlocked`), because the server has no endpoint that lists a
+  share's files. `openShared()` draws the popup from that map. A one-second
+  `tick()` updates the countdown and drops unlocks whose 15-minute window or
+  share has ended: it closes the popup with a message and swaps the row's
+  buttons back. List refreshes do the same check, so a revoke is noticed. The
+  popup is emptied (previews removed) whenever it closes, including with Esc.
 - **Previews** use `<img src=".../view">` with an `error` handler. **Downloads**
   are plain links to `.../download`, as the handoff specifies. **Personal data**
   is fetched as JSON and drawn with `textContent`.
@@ -176,8 +191,12 @@ download was not saved and compared by hash.
 - Plain download links show raw JSON in the browser if the server returns an
   error. The handoff asks for normal links; a `fetch`-and-save version would give
   friendlier errors but holds the file in memory.
-- After a reload the shared-file list is gone (no listing endpoint exists).
-  The requester must unlock again while the share is active.
+- After a reload the shared-file list is gone (no listing endpoint exists, and
+  the list is deliberately not saved in browser storage). The requester must
+  unlock again while the share is active. "View files" only works while the
+  unlock window is open and the page has not been reloaded.
+- If the owner revokes while the popup is open, the popup closes the next time
+  the requester opens a file or the list refreshes, not instantly.
 - The unlock lock after a 429 is per page load, in memory. The server still
   enforces its own limit after a reload.
 - Browser clock differences can make the expiry and countdown display a little
@@ -191,3 +210,31 @@ download was not saved and compared by hash.
 - Take real screenshots for the report section "Screenshots and demo
   walkthrough", and rehearse the 5-minute demo twice in a row.
 - Optional: a `fetch`-based download that shows friendly errors.
+
+## 11. Demo data
+
+`scripts/seed_sharing_demo.py` creates synthetic data through the real code, so
+the crypto is real. It writes to the database the app is configured for (the
+one `python run.py` uses) and prints that path first. It only adds users named
+`demo-a`, `demo-b`, `demo-c` (password printed at the end), and does nothing if
+`demo-a` exists. If it fails part-way it removes the demo users it made.
+
+```bash
+python scripts/seed_sharing_demo.py
+```
+
+| Request | State | Use it to test |
+|---|---|---|
+| demo-a to demo-b, "Second opinion on my scan" | approved, active | Unlock (as demo-a), Show key package and Revoke (as demo-b) |
+| demo-a to demo-b, "Insurance check" | revoked | revoked badge, past list |
+| demo-a to demo-b, "Curious" | rejected | rejected badge, past list |
+| demo-a to demo-b, "Old request" | expired (aged 8 days) | expired badge, no actions |
+| demo-b to demo-a | pending | one account in both roles (demo-a approves or rejects) |
+| demo-c to demo-b | pending | Reject; demo-c is also the "stolen package" user |
+| demo-a to demo-b, "Approve me live" | pending | the live approve walkthrough |
+
+demo-b owns five records (personal data, a real PNG that previews, a fake PNG
+that shows the preview fallback, a PDF, an MP4); demo-a owns one personal record.
+
+A running dev server caches templates. After pulling UI changes, restart
+`python run.py`.

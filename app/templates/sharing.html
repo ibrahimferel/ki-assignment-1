@@ -10,14 +10,17 @@
 <div class="vault-frame" id="sharing" data-requests-url="{{ url_for('sharing.list_requests') }}" data-records-url="{{ url_for('storage.index') }}" data-login-url="{{ url_for('auth.login') }}">
   <header class="vault-header container">
     <a class="brand" href="{{ url_for('main.index') }}"><span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 32 32" fill="none"><path d="M4 17h6l3-7 5 13 3-6h7" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"/></svg></span><span>medvault<span class="accent">.</span></span></a>
-    <nav aria-label="Sharing"><a href="{{ url_for('main.index') }}">Your vault</a><a href="#request-section">Request access</a><a href="#requests-section">Requests</a></nav>
+    <nav aria-label="Sharing"><a href="{{ url_for('main.index') }}">Your vault</a><a href="#outgoing-section">Request access</a><a href="#incoming-section">Incoming</a></nav>
     <form method="post" action="{{ url_for('auth.logout') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="logout" type="submit">Log out <span aria-hidden="true">&#8599;</span></button></form>
   </header>
   <div class="container vault-content">
-    <div class="welcome"><div><h1>Sharing<span class="accent">.</span></h1><p>Ask for access to someone else's records, or decide who can see yours.</p><p class="signed-in">Logged in as {{ current_user.username }}.</p></div></div>
+    <div class="welcome"><div><h1>Sharing<span class="accent">.</span></h1><p>Ask for access to someone else's records, or decide who can see yours.</p><p class="signed-in">Logged in as {{ current_user.username }}.</p></div><button class="subtle-button" type="button" id="refresh-requests">Refresh requests</button></div>
     <p id="sharing-message" class="notice" role="status" aria-live="polite" hidden></p>
-    <div class="workspace-grid">
-      <section class="panel" id="request-section" aria-labelledby="request-heading"><span class="tag">ASK FOR ACCESS</span><h2 id="request-heading">Request access<span class="accent">.</span></h2><p>Enter the username of the person whose records you need to see, and explain why.</p>
+    <div class="sharing-grid">
+      <section class="panel" id="outgoing-section" aria-labelledby="request-heading">
+        <span class="tag">YOU ASK</span>
+        <h2 id="request-heading">Request access<span class="accent">.</span></h2>
+        <p>Enter the username of the person whose records you need to see, and explain why.</p>
         <form id="request-form" novalidate>
           <label for="request-username">Owner's username</label>
           <input id="request-username" name="username" autocomplete="off" autocapitalize="none" spellcheck="false" maxlength="64" required aria-describedby="request-username-hint">
@@ -28,25 +31,32 @@
           <button class="primary button full" type="submit" id="request-submit">Send request <span aria-hidden="true">&#8599;</span></button>
           <p id="request-status" class="field-hint form-status" role="status" aria-live="polite"></p>
         </form>
+        <h3 class="list-heading">Your requests <small>access you asked for</small></h3>
+        <p id="outgoing-status" class="field-hint list-summary" role="status" aria-live="polite">Loading requests...</p>
+        <ul id="outgoing-list" class="record-list request-list" aria-label="Your outgoing requests"></ul>
+        <details class="past-requests" id="outgoing-past" hidden><summary id="outgoing-past-summary">Past requests</summary><ul id="outgoing-past-list" class="record-list request-list" aria-label="Past outgoing requests"></ul></details>
       </section>
-      <section class="panel" id="requests-section" aria-labelledby="requests-heading">
-        <div class="panel-heading"><div><span class="tag">YOUR REQUESTS</span><h2 id="requests-heading">Requests<span class="accent">.</span></h2><p>Requests you received and requests you sent.</p></div><button class="subtle-button" type="button" id="refresh-requests">Refresh</button></div>
-        <h3 class="list-heading">Incoming <small>people asking for your records</small></h3>
-        <p id="incoming-status" class="field-hint" role="status" aria-live="polite">Loading requests...</p>
+      <section class="panel" id="incoming-section" aria-labelledby="incoming-heading">
+        <span class="tag">ASKED OF YOU</span>
+        <h2 id="incoming-heading">Incoming requests<span class="accent">.</span></h2>
+        <p>People who asked to see your records. You choose exactly which records they get.</p>
+        <p id="incoming-status" class="field-hint list-summary" role="status" aria-live="polite">Loading requests...</p>
         <ul id="incoming-list" class="record-list request-list" aria-label="Incoming requests"></ul>
-        <h3 class="list-heading">Outgoing <small>access you asked for</small></h3>
-        <p id="outgoing-status" class="field-hint" role="status" aria-live="polite">Loading requests...</p>
-        <ul id="outgoing-list" class="record-list request-list" aria-label="Outgoing requests"></ul>
+        <details class="past-requests" id="incoming-past" hidden><summary id="incoming-past-summary">Past requests</summary><ul id="incoming-past-list" class="record-list request-list" aria-label="Past incoming requests"></ul></details>
       </section>
     </div>
-    <section class="panel shared-panel" id="shared-panel" aria-labelledby="shared-heading" hidden>
-      <div class="panel-heading"><div><span class="tag">SHARED WITH YOU</span><h2 id="shared-heading">Shared files<span class="accent">.</span></h2><p id="shared-owner"></p></div><button class="subtle-button" type="button" id="shared-hide">Hide files</button></div>
-      <dl class="deadlines"><div><dt>Share expires</dt><dd id="shared-expires"></dd></div><div><dt>Unlock ends</dt><dd id="shared-unlock"></dd></div></dl>
-      <p id="shared-status" class="field-hint" role="status" aria-live="polite"></p>
-      <ul id="shared-files" class="record-list shared-files"></ul>
-    </section>
   </div>
   <footer class="container vault-footer">PERSONAL RECORDS, THOUGHTFULLY ORGANIZED.</footer>
+
+  <dialog id="shared-dialog" class="wide files-dialog" aria-labelledby="shared-title">
+    <div class="dialog-head">
+      <div><span class="tag">SHARED WITH YOU</span><h2 id="shared-title">Shared files</h2><p id="shared-owner"></p></div>
+      <button class="subtle-button" type="button" id="shared-close">Close</button>
+    </div>
+    <dl class="deadlines"><div><dt>Share expires</dt><dd id="shared-expires"></dd></div><div><dt>Unlock ends</dt><dd id="shared-unlock"></dd></div></dl>
+    <p id="shared-status" class="field-hint" role="status" aria-live="polite"></p>
+    <ul id="shared-files" class="record-list shared-files"></ul>
+  </dialog>
 
   <dialog id="approve-dialog" class="wide" aria-labelledby="approve-title">
     <form id="approve-form" novalidate>

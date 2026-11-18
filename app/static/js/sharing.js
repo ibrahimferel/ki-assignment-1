@@ -22,7 +22,7 @@
   const packageDialog = $('package-dialog');
   const unlockDialog = $('unlock-dialog');
   const revokeDialog = $('revoke-dialog');
-  const sharedPanel = $('shared-panel');
+  const sharedDialog = $('shared-dialog');
   const sharedFiles = $('shared-files');
 
   const USERNAME_RULE = /^[a-z0-9][a-z0-9._-]{1,30}[a-z0-9]$/;
@@ -40,7 +40,13 @@
   let incoming = [];
   let outgoing = [];
   let loadCounter = 0;
-  let shared = null;            // the open shared-files view, or null
+  // What the last successful unlock returned, per request id:
+  // {files, unlockedUntil, expiresAt}. The server has no endpoint that lists
+  // a share's files, so this is the only copy. It lives in memory only and is
+  // dropped when the 15-minute unlock window ends, the share ends, or the page
+  // is reloaded (then the requester unlocks again).
+  const unlocked = new Map();
+  let sharedOpen = null;        // id of the request whose files dialog is open
   let sharedTimer = null;
   const unlockLockedUntil = new Map(); // request id -> timestamp (429 lock)
   let unlockLockTimer = null;
@@ -191,12 +197,12 @@
     const item = el('li', 'record-item request-item');
     const meta = el('div', 'record-meta');
     const top = el('div', 'request-top');
-    top.append(el('strong', '', entry.username), el('span', `badge badge-${statusLabel(entry)}`, statusLabel(entry)));
-    meta.append(top, el('small', 'request-reason', `Reason: ${entry.reason}`));
+    top.append(el('strong', 'request-name', entry.username), el('span', `badge badge-${statusLabel(entry)}`, statusLabel(entry)));
+    meta.append(top, el('p', 'request-reason', entry.reason));
     const dates = [`Requested ${formatDate(entry.created_at)}`];
     if (entry.decided_at) dates.push(`Decided ${formatDate(entry.decided_at)}`);
     if (entry.expires_at) dates.push(`${isExpired(entry) ? 'Expired' : 'Expires'} ${formatDate(entry.expires_at)}`);
-    meta.append(el('small', '', dates.join(' · ')));
+    meta.append(el('small', 'request-dates', dates.join(' · ')));
 
     const actions = el('div', 'record-actions');
     if (role === 'incoming') {
@@ -212,22 +218,79 @@
         );
       }
     } else if (isActive(entry)) {
-      actions.append(makeButton('Unlock', () => openUnlock(entry), 'primary button small'));
+      const state = currentUnlock(entry.id);
+      if (state) {
+        meta.append(el('small', 'request-unlocked', `Files unlocked until ${formatDate(new Date(state.unlockedUntil).toISOString())}`));
+        actions.append(
+          makeButton('View files', () => openShared(entry), 'primary button small'),
+          makeButton('Unlock again', () => openUnlock(entry)),
+        );
+      } else {
+        actions.append(makeButton('Unlock', () => openUnlock(entry), 'primary button small'));
+      }
     }
     item.append(meta, actions);
     return item;
   }
 
-  function renderList(list, statusEl, entries, role, emptyText) {
-    list.replaceChildren(...entries.map((entry) => renderEntry(entry, role)));
-    statusEl.textContent = entries.length
-      ? `${entries.length} ${entries.length === 1 ? 'request' : 'requests'}`
-      : emptyText;
+  // A request is "past" when nothing more can be done with it.
+  function isPast(entry) {
+    return entry.status === 'rejected' || entry.status === 'revoked' || isExpired(entry);
   }
 
+  // Needs-attention first: pending, then active shares, newest first.
+  function byPriority(a, b) {
+    const rank = (entry) => (entry.status === 'pending' ? 0 : 1);
+    return rank(a) - rank(b) || b.id - a.id;
+  }
+
+  function plural(count, one, many) {
+    return `${count} ${count === 1 ? one : many}`;
+  }
+
+  // Draws one side (incoming or outgoing). Requests that still need action
+  // are always visible; finished ones sit in a collapsed "Past requests".
+  function renderSide(side, entries, role) {
+    const current = entries.filter((entry) => !isPast(entry)).sort(byPriority);
+    const past = entries.filter(isPast);
+    side.list.replaceChildren(...current.map((entry) => renderEntry(entry, role)));
+    side.pastList.replaceChildren(...past.map((entry) => renderEntry(entry, role)));
+    side.pastBox.hidden = past.length === 0;
+    side.pastSummary.textContent = `Past requests (${past.length})`;
+
+    const pending = current.filter((entry) => entry.status === 'pending').length;
+    const active = current.length - pending;
+    const parts = [];
+    if (role === 'incoming') {
+      if (pending) parts.push(`${plural(pending, 'request is', 'requests are')} waiting for your decision`);
+      if (active) parts.push(`${plural(active, 'active share', 'active shares')}`);
+    } else {
+      if (pending) parts.push(`${plural(pending, 'request is', 'requests are')} waiting for the owner`);
+      if (active) parts.push(`${plural(active, 'share is', 'shares are')} ready to unlock`);
+    }
+    if (parts.length) {
+      side.status.textContent = parts.join(' · ');
+    } else if (past.length) {
+      side.status.textContent = 'Nothing needs your attention right now.';
+    } else {
+      side.status.textContent = role === 'incoming'
+        ? 'No one has asked for access to your records yet.'
+        : 'You have not requested access from anyone yet.';
+    }
+  }
+
+  const incomingSide = {
+    list: incomingList, status: incomingStatus,
+    pastBox: $('incoming-past'), pastList: $('incoming-past-list'), pastSummary: $('incoming-past-summary'),
+  };
+  const outgoingSide = {
+    list: outgoingList, status: outgoingStatus,
+    pastBox: $('outgoing-past'), pastList: $('outgoing-past-list'), pastSummary: $('outgoing-past-summary'),
+  };
+
   function renderRequests() {
-    renderList(incomingList, incomingStatus, incoming, 'incoming', 'No one has asked for access to your records yet.');
-    renderList(outgoingList, outgoingStatus, outgoing, 'outgoing', 'You have not requested access to anyone yet.');
+    renderSide(incomingSide, incoming, 'incoming');
+    renderSide(outgoingSide, outgoing, 'outgoing');
   }
 
   async function loadRequests() {
@@ -239,8 +302,8 @@
       if (ticket !== loadCounter) return; // a newer load replaced this one
       incoming = Array.isArray(data.incoming) ? data.incoming : [];
       outgoing = Array.isArray(data.outgoing) ? data.outgoing : [];
+      pruneUnlocks();
       renderRequests();
-      checkSharedStillValid();
     } catch (error) {
       if (ticket !== loadCounter) return;
       const text = `Could not load requests. ${error.message}`;
@@ -582,7 +645,9 @@
           },
         });
         unlockDialog.close();
-        showShared(target, data);
+        rememberUnlock(target, data);
+        renderRequests();
+        openShared(target);
         say(`Unlocked. You can now see the files ${target.username} shared with you.`);
       } catch (error) {
         setUnlockError(error.message);
@@ -605,46 +670,77 @@
     return requestUrl(requestId, `/files/${fileId}/${action}`);
   }
 
-  function lockShared(reason) {
-    window.clearInterval(sharedTimer);
-    sharedTimer = null;
-    shared = null;
-    sharedFiles.replaceChildren(); // also removes the preview <img> elements
-    sharedPanel.hidden = true;
+  // The unlock state of a request while its 15-minute window is still open.
+  function currentUnlock(requestId) {
+    const state = unlocked.get(requestId);
+    return state && state.unlockedUntil !== null && state.unlockedUntil > Date.now() ? state : null;
+  }
+
+  function rememberUnlock(entry, data) {
+    unlocked.set(entry.id, {
+      files: Array.isArray(data.files) ? data.files : [],
+      unlockedUntil: parseDate(data.unlocked_until),
+      expiresAt: parseDate(entry.expires_at),
+    });
+  }
+
+  // Closes the files dialog and empties it, which also removes the preview
+  // images. The unlock state itself is kept so the dialog can be reopened.
+  function closeShared(reason) {
+    sharedOpen = null;
+    sharedFiles.replaceChildren();
+    if (sharedDialog.open) sharedDialog.close();
     if (reason) say(reason, true);
   }
 
-  function updateDeadlines() {
-    if (!shared) return;
+  // Forgets unlocks that have ended: window over, share expired or revoked.
+  // Returns true when something was removed (the list must be redrawn).
+  function pruneUnlocks() {
     const now = Date.now();
-    if (shared.unlockedUntil !== null && shared.unlockedUntil <= now) {
-      lockShared('The 15-minute unlock window ended. Unlock again with the key package and your password to keep viewing.');
-      loadRequests();
-      return;
-    }
-    if (shared.expiresAt !== null && shared.expiresAt <= now) {
-      lockShared('This share has expired. Ask the owner to share again.');
-      loadRequests();
-      return;
-    }
-    $('shared-unlock').textContent = shared.unlockedUntil === null
-      ? '-'
-      : `${formatDate(new Date(shared.unlockedUntil).toISOString())} (${formatCountdown(shared.unlockedUntil - now)} left)`;
+    let changed = false;
+    unlocked.forEach((state, id) => {
+      const entry = outgoing.find((candidate) => candidate.id === id);
+      let reason = '';
+      if (!entry || !isActive(entry)) {
+        reason = 'Access to those files has ended. The share was revoked or has expired.';
+      } else if (state.unlockedUntil !== null && state.unlockedUntil <= now) {
+        reason = 'The 15-minute unlock window ended. Unlock again with the key package and your password to keep viewing.';
+      }
+      if (!reason) return;
+      unlocked.delete(id);
+      changed = true;
+      if (sharedOpen === id) closeShared(reason);
+    });
+    return changed;
   }
 
-  function checkSharedStillValid() {
-    if (!shared) return;
-    const entry = outgoing.find((candidate) => candidate.id === shared.requestId);
-    if (!entry || !isActive(entry)) lockShared('Access to those files has ended. The share was revoked or has expired.');
+  function updateDeadlines() {
+    const state = sharedOpen === null ? null : unlocked.get(sharedOpen);
+    if (!state) return;
+    $('shared-unlock').textContent = state.unlockedUntil === null
+      ? '-'
+      : `${formatDate(new Date(state.unlockedUntil).toISOString())} (${formatCountdown(state.unlockedUntil - Date.now())} left)`;
+  }
+
+  // Runs every second: refreshes the countdown, and when an unlock window or
+  // a share ends it closes the dialog and swaps the row's buttons back.
+  function tick() {
+    updateDeadlines();
+    if (unlocked.size && pruneUnlocks()) {
+      renderRequests();
+      loadRequests();
+    }
   }
 
   function sharedProblem(error) {
-    const status = $('shared-status');
     if (error.status === 404) {
-      status.textContent = 'This file is no longer available. The unlock window may have ended or the share was revoked. Check your requests, and unlock again only if the share is still active.';
+      const id = sharedOpen;
+      unlocked.delete(id);
+      closeShared('Those files are no longer available. The unlock window may have ended or the share was revoked. Unlock again only if the share is still active.');
+      renderRequests();
       loadRequests();
     } else {
-      status.textContent = error.message;
+      $('shared-status').textContent = error.message;
     }
   }
 
@@ -703,27 +799,32 @@
     });
   }
 
-  function showShared(entry, data) {
-    window.clearInterval(sharedTimer);
-    const files = Array.isArray(data.files) ? data.files : [];
-    shared = {
-      requestId: entry.id,
-      expiresAt: parseDate(entry.expires_at),
-      unlockedUntil: parseDate(data.unlocked_until),
-    };
-    $('shared-owner').textContent = `Shared by ${entry.username}. Only the records they approved are listed.`;
+  // Shows the files dialog for a request that has been unlocked. If the
+  // unlock window is over, asks for the key package and password again.
+  function openShared(entry) {
+    const state = currentUnlock(entry.id);
+    if (!state) {
+      unlocked.delete(entry.id);
+      renderRequests();
+      openUnlock(entry);
+      return;
+    }
+    sharedOpen = entry.id;
+    $('shared-title').textContent = `Files from ${entry.username}`;
+    $('shared-owner').textContent = 'Only the records they approved are listed.';
     $('shared-expires').textContent = formatDate(entry.expires_at);
-    $('shared-status').textContent = files.length ? '' : 'No files were shared in this request.';
-    sharedFiles.replaceChildren(...files.map((file) => renderSharedFile(file, entry.id)));
-    sharedPanel.hidden = false;
+    $('shared-status').textContent = state.files.length ? '' : 'No files were shared in this request.';
+    sharedFiles.replaceChildren(...state.files.map((file) => renderSharedFile(file, entry.id)));
     updateDeadlines();
-    sharedTimer = window.setInterval(updateDeadlines, 1000);
-    sharedPanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    if (!sharedDialog.open) sharedDialog.showModal();
+    sharedDialog.scrollTop = 0; // always start at the top, not at the focused element
   }
 
-  $('shared-hide').addEventListener('click', () => {
-    lockShared('');
-    say('Shared files hidden. Unlock again to view them while the share is active.');
+  $('shared-close').addEventListener('click', () => sharedDialog.close());
+  // Also runs when the dialog is closed with the Escape key.
+  sharedDialog.addEventListener('close', () => {
+    sharedOpen = null;
+    sharedFiles.replaceChildren();
   });
 
   // -------------------------------------------------------------------- start
@@ -736,5 +837,6 @@
       loadRequests();
     }
   });
+  sharedTimer = window.setInterval(tick, 1000);
   loadRequests();
 })();
