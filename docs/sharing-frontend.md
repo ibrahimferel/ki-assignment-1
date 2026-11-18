@@ -47,38 +47,56 @@ The CSRF token comes from the logout form in the page header
 (`<input name="csrf_token" value="{{ csrf_token() }}">`); `sharing.js` reads it
 at the time of each POST.
 
-### Layout (revised after first review)
+### Layout (second revision, design review)
 
-Two separate panels side by side (stacked under 1000 px): **YOU ASK** on the
-left (the request form, then "Your requests", where Unlock lives) and **ASKED OF
-YOU** on the right (Incoming requests, where Approve, Reject and Revoke live).
-Each list puts requests that still need action first (pending, then active
-shares) and moves finished ones (rejected, revoked, expired) into a collapsed
-"Past requests (n)" section. A one-line summary above each list says what needs
-attention, for example "2 requests are waiting for your decision". The first
-version put both lists in one long panel, which buried Outgoing and mixed
-finished requests with live ones.
+The first version had two panels full of headings, tags and grey sub-text, and
+an approved request was only a green badge. The page was reduced to:
+
+- **One title row**: "Sharing", a Refresh button and one primary button,
+  **Request access** (the form lives in a dialog, because it is used rarely).
+- **Two clear choices**, shown as two side-by-side selector cards, each with a
+  title and one line saying what it is for: **Review requests** ("People who want
+  to see your records", where the user approves or declines) and **My requests**
+  ("Records you asked to see", where the user unlocks). A teal number on a card
+  counts requests that wait for the user: pending requests on "Review requests",
+  approved-but-not-unlocked requests on "My requests". On first load the card
+  with something waiting is opened.
+- **One card per request.** The top of the card is a sentence ("You shared
+  records with **name**"), the reason in quotes, and at most one highlighted
+  **next-step line** telling the user what to do. A footer row, separated by a
+  thin line, holds the dates on the left and the buttons on the right. The footer
+  wraps on narrow screens, so buttons never run off the edge. No uppercase status
+  badges, no section tags, no avatars.
+- **Past requests** (declined, removed, expired) in a collapsed section, dimmed.
+  When a tab has no open requests but has past ones, a single short line says so
+  ("No requests are waiting for your review.") and the past list is opened once, so
+  the tab is never an empty gap with a folded section underneath.
+
+Wording of the rows (this is the whole state model the user sees):
+
+| Who | State | Sentence | Next step shown | Actions |
+|---|---|---|---|---|
+| Owner | pending | "**name** asked to see your records" + chip "Needs your decision" | none | Approve, Decline |
+| Owner | approved, active | "You shared records with **name**" | "Send name the key package so they can unlock the files." | Get key package, Remove access |
+| Owner | declined / removed / expired | "You declined name", "You removed access for name", "name's access ended" | none | none |
+| Requester | pending | "Waiting for **name** to respond" | none | none |
+| Requester | approved, active | "**name** approved your request" + chip "Ready to unlock" | "Ask name for the key package, then unlock the files." | Unlock files |
+| Requester | unlocked (window open) | same sentence | "Files are unlocked until 8:15 AM." | Open files, Unlock again |
+| Requester | declined / removed / expired | "name declined your request", "name removed your access", "Your access to name's records ended" | none | none |
+
+Within a tab, requests that need the user come first, then newest first.
 
 ## 4. What the page contains (and which requirement it covers)
 
 | Component | Element(s) | Behaviour |
 |---|---|---|
-| Request access form | `#request-form` | Username and reason, client-side checks mirroring the server rules (3 to 32 chars `a-z0-9._-`, reason required, 500 max, live counter). Sends `POST /sharing/requests` with the username trimmed and lowercased. Success message; clear texts for 400 and 404. |
-| Incoming and Outgoing lists | `#incoming-list`, `#outgoing-list` | One `GET /sharing/requests`. Shows counterpart username, reason, status badge, and dates. Has loading, empty and error states. Buttons depend on status: see the matrix below. |
-| Owner approval picker | `#approve-dialog` | Loads the owner's records from `GET /storage/` into a checklist, all ticked by default. Blocks sending when none are ticked (and over 100). Sends `{file_ids}`. |
-| Key-package panel | `#package-dialog` | Read-only box with the full package, **Copy package**, **Download .txt**. Reopened later with **Show key package** (`GET .../key-package`). Hint text says only what is true: the text is encrypted and only the requester can open it with their password. |
-| Requester unlock form | `#unlock-dialog` | Paste the package, or choose a `.txt` file (`FileReader`). Password field (`type=password`) for the requester's own account password. |
-| Shared-files popup | `#shared-dialog` | A popup (not a panel at the bottom of the page) opened after a successful unlock. Per file: Download link, JPG/PNG `<img>` preview, personal-data "View details". Shows share expiry and a live unlock countdown. While the unlock window is open, the request row in "Your requests" shows **View files** (reopens the popup with no password) and **Unlock again**; after the window ends it goes back to **Unlock**. |
-| Owner revoke | `#revoke-dialog` | Confirmation (states that downloaded files cannot be withdrawn), then `POST .../revoke`. |
-
-### Button matrix (what the lists show)
-
-| Status | Incoming (I am owner) | Outgoing (I am requester) |
-|---|---|---|
-| pending | Approve, Reject | none |
-| approved, active | Show key package, Revoke | Unlock; or View files + Unlock again while the 15-minute unlock window is open |
-| approved, past `expires_at` | none (badge "expired") | none (badge "expired") |
-| rejected / revoked | none | none |
+| Request access | `#request-dialog`, `#request-form` | Opened by the **Request access** button. Username and reason, client-side checks mirroring the server rules (3 to 32 chars `a-z0-9._-`, reason required, 500 max, live counter). Sends `POST /sharing/requests` with the username trimmed and lowercased. On success the dialog closes, a message is shown and the "My requests" tab opens. Clear texts for 400 and 404. |
+| Requests lists | `#incoming-list`, `#outgoing-list`, tabs | One `GET /sharing/requests`. Loading, empty and error states appear as one centered line only when the list has nothing to show. Row wording and buttons: see the table above. |
+| Owner approval picker | `#approve-dialog` | **Approve** opens it. Loads the owner's records from `GET /storage/` into a checklist, all ticked by default. Blocks sending when none are ticked (or more than 100). Sends `{file_ids}`. |
+| Key-package step | `#package-dialog` | Opens right after approving, and later from **Get key package** (`GET .../key-package`). Title "Send the key package to name", one sentence explaining what to do with it, the text box, **Copy key package**, **Download .txt**, **Done**. |
+| Unlock | `#unlock-dialog` | **Unlock files** opens it. Paste the package or choose a `.txt` file (`FileReader`), and the MedVault password (`type=password`). |
+| Shared-files popup | `#shared-dialog` | Opens after a successful unlock, and from **Open files** while the unlock window is open. One meta line: "Access ends ... · Unlocked for m:ss". Per file: Download link, JPG/PNG `<img>` preview, personal-data "View details". |
+| Remove access | `#revoke-dialog` | "Remove access for name?" and what it means (downloaded files stay with them), then `POST .../revoke`. |
 
 Expiry is computed in the browser from `expires_at`, because the server keeps
 the status `approved` after expiry.
@@ -193,7 +211,7 @@ download was not saved and compared by hash.
   friendlier errors but holds the file in memory.
 - After a reload the shared-file list is gone (no listing endpoint exists, and
   the list is deliberately not saved in browser storage). The requester must
-  unlock again while the share is active. "View files" only works while the
+  unlock again while the share is active. "Open files" only works while the
   unlock window is open and the page has not been reloaded.
 - If the owner revokes while the popup is open, the popup closes the next time
   the requester opens a file or the list refreshes, not instantly.
@@ -225,12 +243,12 @@ python scripts/seed_sharing_demo.py
 
 | Request | State | Use it to test |
 |---|---|---|
-| demo-a to demo-b, "Second opinion on my scan" | approved, active | Unlock (as demo-a), Show key package and Revoke (as demo-b) |
+| demo-a to demo-b, "Second opinion on my scan" | approved, active | Unlock files (as demo-a), Get key package and Remove access (as demo-b) |
 | demo-a to demo-b, "Insurance check" | revoked | revoked badge, past list |
 | demo-a to demo-b, "Curious" | rejected | rejected badge, past list |
 | demo-a to demo-b, "Old request" | expired (aged 8 days) | expired badge, no actions |
 | demo-b to demo-a | pending | one account in both roles (demo-a approves or rejects) |
-| demo-c to demo-b | pending | Reject; demo-c is also the "stolen package" user |
+| demo-c to demo-b | pending | Decline; demo-c is also the "stolen package" user |
 | demo-a to demo-b, "Approve me live" | pending | the live approve walkthrough |
 
 demo-b owns five records (personal data, a real PNG that previews, a fake PNG

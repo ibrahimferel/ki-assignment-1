@@ -24,6 +24,7 @@
   const revokeDialog = $('revoke-dialog');
   const sharedDialog = $('shared-dialog');
   const sharedFiles = $('shared-files');
+  const requestDialog = $('request-dialog');
 
   const USERNAME_RULE = /^[a-z0-9][a-z0-9._-]{1,30}[a-z0-9]$/;
   const MAX_REASON = 500;
@@ -193,43 +194,75 @@
     return button;
   }
 
-  function renderEntry(entry, role) {
-    const item = el('li', 'record-item request-item');
-    const meta = el('div', 'record-meta');
-    const top = el('div', 'request-top');
-    top.append(el('strong', 'request-name', entry.username), el('span', `badge badge-${statusLabel(entry)}`, statusLabel(entry)));
-    meta.append(top, el('p', 'request-reason', entry.reason));
-    const dates = [`Requested ${formatDate(entry.created_at)}`];
-    if (entry.decided_at) dates.push(`Decided ${formatDate(entry.decided_at)}`);
-    if (entry.expires_at) dates.push(`${isExpired(entry) ? 'Expired' : 'Expires'} ${formatDate(entry.expires_at)}`);
-    meta.append(el('small', 'request-dates', dates.join(' · ')));
+  // Each request reads as a short sentence: who, what happened, what to do next.
+  function describeEntry(entry, role) {
+    const name = entry.username;
+    if (role === 'incoming') {
+      if (entry.status === 'pending') return { before: '', after: ' asked to see your records', chip: 'Needs your decision', tone: 'amber' };
+      if (isActive(entry)) return { before: 'You shared records with ', after: '', next: `Send ${name} the key package so they can unlock the files.` };
+      if (entry.status === 'rejected') return { before: 'You declined ', after: '' };
+      if (entry.status === 'revoked') return { before: 'You removed access for ', after: '' };
+      return { before: '', after: "'s access ended" };
+    }
+    if (entry.status === 'pending') return { before: 'Waiting for ', after: ' to respond' };
+    if (isActive(entry)) {
+      const state = currentUnlock(entry.id);
+      if (state) {
+        return { before: '', after: ' approved your request', next: `Files are unlocked until ${formatDate(new Date(state.unlockedUntil).toISOString())}.` };
+      }
+      return { before: '', after: ' approved your request', next: `Ask ${name} for the key package, then unlock the files.`, chip: 'Ready to unlock', tone: 'teal' };
+    }
+    if (entry.status === 'rejected') return { before: '', after: ' declined your request' };
+    if (entry.status === 'revoked') return { before: '', after: ' removed your access' };
+    return { before: 'Your access to ', after: "'s records ended" };
+  }
 
-    const actions = el('div', 'record-actions');
+  function describeDates(entry) {
+    const parts = [`Requested ${formatDate(entry.created_at)}`];
+    if (entry.status === 'rejected' && entry.decided_at) parts.push(`Declined ${formatDate(entry.decided_at)}`);
+    if (entry.status === 'revoked' && entry.decided_at) parts.push(`Removed ${formatDate(entry.decided_at)}`);
+    if (entry.status === 'approved' && entry.expires_at) {
+      parts.push(`${isExpired(entry) ? 'Ended' : 'Access ends'} ${formatDate(entry.expires_at)}`);
+    }
+    return parts.join(' · ');
+  }
+
+  function renderEntry(entry, role) {
+    const info = describeEntry(entry, role);
+    const item = el('li', `request-item request-${statusLabel(entry)}`);
+    const body = el('div', 'request-body');
+    const title = el('p', 'request-title');
+    title.append(info.before, el('strong', '', entry.username), info.after);
+    if (info.chip) title.append(el('span', `chip chip-${info.tone}`, info.chip));
+    body.append(title, el('p', 'request-reason', entry.reason));
+    if (info.next) body.append(el('p', 'request-next', info.next));
+
+    const actions = el('div', 'request-actions');
     if (role === 'incoming') {
       if (entry.status === 'pending') {
         actions.append(
           makeButton('Approve', () => openApprove(entry), 'primary button small'),
-          makeButton('Reject', (button) => rejectRequest(entry, button)),
+          makeButton('Decline', (button) => rejectRequest(entry, button)),
         );
       } else if (isActive(entry)) {
         actions.append(
-          makeButton('Show key package', (button) => showKeyPackage(entry, button)),
-          makeButton('Revoke', () => openRevoke(entry), 'danger-button'),
+          makeButton('Get key package', (button) => showKeyPackage(entry, button), 'primary button small'),
+          makeButton('Remove access', () => openRevoke(entry), 'text-danger'),
         );
       }
     } else if (isActive(entry)) {
-      const state = currentUnlock(entry.id);
-      if (state) {
-        meta.append(el('small', 'request-unlocked', `Files unlocked until ${formatDate(new Date(state.unlockedUntil).toISOString())}`));
+      if (currentUnlock(entry.id)) {
         actions.append(
-          makeButton('View files', () => openShared(entry), 'primary button small'),
+          makeButton('Open files', () => openShared(entry), 'primary button small'),
           makeButton('Unlock again', () => openUnlock(entry)),
         );
       } else {
-        actions.append(makeButton('Unlock', () => openUnlock(entry), 'primary button small'));
+        actions.append(makeButton('Unlock files', () => openUnlock(entry), 'primary button small'));
       }
     }
-    item.append(meta, actions);
+    const footer = el('div', 'request-footer');
+    footer.append(el('p', 'request-dates', describeDates(entry)), actions);
+    item.append(body, footer);
     return item;
   }
 
@@ -238,59 +271,100 @@
     return entry.status === 'rejected' || entry.status === 'revoked' || isExpired(entry);
   }
 
-  // Needs-attention first: pending, then active shares, newest first.
-  function byPriority(a, b) {
-    const rank = (entry) => (entry.status === 'pending' ? 0 : 1);
-    return rank(a) - rank(b) || b.id - a.id;
+  // Things that need the user come first, newest first within each group.
+  function byPriority(role) {
+    const rank = (entry) => {
+      if (role === 'incoming') return entry.status === 'pending' ? 0 : 1;
+      if (isActive(entry)) return currentUnlock(entry.id) ? 1 : 0;
+      return 2; // still waiting for the owner
+    };
+    return (a, b) => rank(a) - rank(b) || b.id - a.id;
   }
 
-  function plural(count, one, many) {
-    return `${count} ${count === 1 ? one : many}`;
+  // How many requests on this side are waiting for the user to act.
+  function attentionCount(entries, role) {
+    return entries.filter((entry) => !isPast(entry) && (role === 'incoming'
+      ? entry.status === 'pending'
+      : isActive(entry) && !currentUnlock(entry.id))).length;
   }
 
-  // Draws one side (incoming or outgoing). Requests that still need action
-  // are always visible; finished ones sit in a collapsed "Past requests".
+  // Draws one side (incoming or outgoing). Finished requests sit in a
+  // collapsed "Past requests" section; the tab shows how many need attention.
   function renderSide(side, entries, role) {
-    const current = entries.filter((entry) => !isPast(entry)).sort(byPriority);
+    const current = entries.filter((entry) => !isPast(entry)).sort(byPriority(role));
     const past = entries.filter(isPast);
     side.list.replaceChildren(...current.map((entry) => renderEntry(entry, role)));
     side.pastList.replaceChildren(...past.map((entry) => renderEntry(entry, role)));
     side.pastBox.hidden = past.length === 0;
     side.pastSummary.textContent = `Past requests (${past.length})`;
 
-    const pending = current.filter((entry) => entry.status === 'pending').length;
-    const active = current.length - pending;
-    const parts = [];
-    if (role === 'incoming') {
-      if (pending) parts.push(`${plural(pending, 'request is', 'requests are')} waiting for your decision`);
-      if (active) parts.push(`${plural(active, 'active share', 'active shares')}`);
-    } else {
-      if (pending) parts.push(`${plural(pending, 'request is', 'requests are')} waiting for the owner`);
-      if (active) parts.push(`${plural(active, 'share is', 'shares are')} ready to unlock`);
-    }
-    if (parts.length) {
-      side.status.textContent = parts.join(' · ');
-    } else if (past.length) {
-      side.status.textContent = 'Nothing needs your attention right now.';
-    } else {
-      side.status.textContent = role === 'incoming'
-        ? 'No one has asked for access to your records yet.'
-        : 'You have not requested access from anyone yet.';
+    const attention = attentionCount(entries, role);
+    side.count.textContent = String(attention);
+    side.count.hidden = attention === 0;
+
+    // The status line only appears when there is nothing open to show. If only
+    // finished requests exist, they are opened once so the page is not empty.
+    side.status.hidden = current.length > 0;
+    if (!current.length) {
+      if (past.length) {
+        side.status.textContent = role === 'incoming' ? 'No requests are waiting for your review.' : 'You have no open requests.';
+        if (!side.pastShown) {
+          side.pastBox.open = true;
+          side.pastShown = true;
+        }
+      } else if (role === 'incoming') {
+        side.status.textContent = 'No one has asked to see your records yet.';
+      } else {
+        side.status.textContent = "You haven't asked to see anyone's records yet. Use Request access to start.";
+      }
     }
   }
 
   const incomingSide = {
-    list: incomingList, status: incomingStatus,
+    list: incomingList, status: incomingStatus, count: $('incoming-count'),
     pastBox: $('incoming-past'), pastList: $('incoming-past-list'), pastSummary: $('incoming-past-summary'),
   };
   const outgoingSide = {
-    list: outgoingList, status: outgoingStatus,
+    list: outgoingList, status: outgoingStatus, count: $('outgoing-count'),
     pastBox: $('outgoing-past'), pastList: $('outgoing-past-list'), pastSummary: $('outgoing-past-summary'),
   };
 
   function renderRequests() {
     renderSide(incomingSide, incoming, 'incoming');
     renderSide(outgoingSide, outgoing, 'outgoing');
+  }
+
+  // ------------------------------------------------------------------- tabs
+  const tabs = {
+    incoming: { tab: $('tab-incoming'), pane: $('pane-incoming') },
+    outgoing: { tab: $('tab-outgoing'), pane: $('pane-outgoing') },
+  };
+
+  function selectTab(name, focus = false) {
+    Object.keys(tabs).forEach((key) => {
+      const on = key === name;
+      tabs[key].tab.setAttribute('aria-selected', String(on));
+      tabs[key].tab.tabIndex = on ? 0 : -1;
+      tabs[key].pane.hidden = !on;
+    });
+    if (focus) tabs[name].tab.focus();
+  }
+
+  Object.keys(tabs).forEach((key) => {
+    tabs[key].tab.addEventListener('click', () => selectTab(key));
+    tabs[key].tab.addEventListener('keydown', (event) => {
+      if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+      event.preventDefault();
+      selectTab(key === 'incoming' ? 'outgoing' : 'incoming', true);
+    });
+  });
+
+  // On the first load, open the tab that has something waiting for the user.
+  let firstLoad = true;
+  function chooseInitialTab() {
+    if (!firstLoad) return;
+    firstLoad = false;
+    if (!attentionCount(incoming, 'incoming') && attentionCount(outgoing, 'outgoing')) selectTab('outgoing');
   }
 
   async function loadRequests() {
@@ -304,11 +378,14 @@
       outgoing = Array.isArray(data.outgoing) ? data.outgoing : [];
       pruneUnlocks();
       renderRequests();
+      chooseInitialTab();
     } catch (error) {
       if (ticket !== loadCounter) return;
       const text = `Could not load requests. ${error.message}`;
       incomingStatus.textContent = text;
       outgoingStatus.textContent = text;
+      incomingStatus.hidden = false;
+      outgoingStatus.hidden = false;
     }
   }
 
@@ -348,9 +425,9 @@
             404: 'No user with that username was found.',
           },
         });
-        requestStatus.textContent = `Request sent to ${checked.username}. They will see it under Incoming.`;
-        requestForm.reset();
-        $('request-reason-count').textContent = '0';
+        requestDialog.close();
+        say(`Request sent to ${checked.username}. Their answer will appear under My requests.`);
+        selectTab('outgoing');
         await loadRequests();
       } catch (error) {
         requestStatus.classList.add('field-error');
@@ -359,12 +436,23 @@
     });
   });
 
+  $('request-open').addEventListener('click', () => {
+    requestStatus.textContent = '';
+    requestDialog.showModal();
+  });
+  $('request-cancel').addEventListener('click', () => requestDialog.close());
+  requestDialog.addEventListener('close', () => {
+    requestForm.reset();
+    $('request-reason-count').textContent = '0';
+    requestStatus.textContent = '';
+  });
+
   // ------------------------------------------------------------ owner: reject
   async function rejectRequest(entry, button) {
     await busy(button, async () => {
       try {
         await api(requestUrl(entry.id, '/reject'), { method: 'POST' });
-        say(`Request from ${entry.username} rejected.`);
+        say(`You declined ${entry.username}'s request.`);
       } catch (error) {
         say(error.message, true);
       }
@@ -381,8 +469,8 @@
 
   async function openApprove(entry) {
     approveTarget = entry;
-    $('approve-title').textContent = `Approve request from ${entry.username}`;
-    $('approve-intro').textContent = `Reason: ${entry.reason}`;
+    $('approve-title').textContent = `Share your records with ${entry.username}`;
+    $('approve-intro').textContent = `Their reason: ${entry.reason}`;
     $('approve-status').textContent = 'Loading your records...';
     $('approve-status').hidden = false;
     $('approve-picker').hidden = true;
@@ -442,7 +530,7 @@
           messages: { 400: 'This request cannot be approved. It may already have been decided, or a selected record is no longer available.' },
         });
         approveDialog.close();
-        say(`Request from ${target.username} approved. Send the key package to them now.`);
+        say(`You approved ${target.username}. Now send them the key package so they can unlock the files.`);
         showPackage(data.key_package, target);
         await loadRequests();
       } catch (error) {
@@ -454,7 +542,8 @@
 
   // -------------------------------------------------------- owner: key package
   function showPackage(text, entry) {
-    $('package-title').textContent = `Key package for ${entry.username}`;
+    $('package-title').textContent = `Send the key package to ${entry.username}`;
+    $('package-intro').textContent = `Copy it and send it to ${entry.username} on WhatsApp or email. Only ${entry.username} can open it, using their own MedVault password.`;
     $('package-text').value = text || '';
     $('package-status').textContent = '';
     packageDialog.showModal();
@@ -482,14 +571,14 @@
     const status = $('package-status');
     try {
       await navigator.clipboard.writeText(field.value);
-      status.textContent = 'Copied. Paste it into WhatsApp or an email.';
+      status.textContent = 'Copied. Now paste it into WhatsApp or an email.';
     } catch (_) {
       field.focus();
       field.select();
       let copied = false;
       try { copied = document.execCommand('copy'); } catch (__) { copied = false; }
       status.textContent = copied
-        ? 'Copied. Paste it into WhatsApp or an email.'
+        ? 'Copied. Now paste it into WhatsApp or an email.'
         : 'Copy failed. The text is selected: press Ctrl+C (or Cmd+C) to copy it.';
     }
   });
@@ -519,7 +608,8 @@
 
   function openRevoke(entry) {
     revokeTarget = entry;
-    $('revoke-description').textContent = `${entry.username} will lose access to the files you shared.`;
+    $('revoke-title').textContent = `Remove access for ${entry.username}?`;
+    $('revoke-description').textContent = `${entry.username} will no longer be able to open the files you shared. Anything they already downloaded stays with them.`;
     $('revoke-error').textContent = '';
     revokeDialog.showModal();
   }
@@ -534,7 +624,7 @@
           messages: { 400: 'This share can no longer be revoked. It may already have been revoked or have expired.' },
         });
         revokeDialog.close();
-        say(`Access for ${target.username} revoked.`);
+        say(`${target.username}'s access was removed.`);
       } catch (error) {
         $('revoke-error').textContent = error.message;
         if (error.status === 400 || error.status === 404) {
@@ -563,7 +653,7 @@
     if (!until || until <= Date.now()) {
       if (unlockTarget) unlockLockedUntil.delete(unlockTarget.id);
       submit.disabled = false;
-      submit.textContent = 'Unlock';
+      submit.textContent = 'Unlock files';
       return;
     }
     const tick = () => {
@@ -573,7 +663,7 @@
         unlockLockTimer = null;
         if (unlockTarget) unlockLockedUntil.delete(unlockTarget.id);
         submit.disabled = false;
-        submit.textContent = 'Unlock';
+        submit.textContent = 'Unlock files';
         setUnlockError('');
         return;
       }
@@ -586,7 +676,8 @@
 
   function openUnlock(entry) {
     unlockTarget = entry;
-    $('unlock-intro').textContent = `Paste the key package ${entry.username} sent you and type your own account password.`;
+    $('unlock-title').textContent = `Unlock files from ${entry.username}`;
+    $('unlock-intro').textContent = `Paste the key package ${entry.username} sent you, then enter your MedVault password.`;
     $('unlock-package').value = '';
     $('unlock-password').value = '';
     $('unlock-file').value = '';
@@ -648,7 +739,7 @@
         rememberUnlock(target, data);
         renderRequests();
         openShared(target);
-        say(`Unlocked. You can now see the files ${target.username} shared with you.`);
+        say(`Files from ${target.username} are unlocked.`);
       } catch (error) {
         setUnlockError(error.message);
         if (error.status === 429) {
@@ -717,9 +808,9 @@
   function updateDeadlines() {
     const state = sharedOpen === null ? null : unlocked.get(sharedOpen);
     if (!state) return;
-    $('shared-unlock').textContent = state.unlockedUntil === null
-      ? '-'
-      : `${formatDate(new Date(state.unlockedUntil).toISOString())} (${formatCountdown(state.unlockedUntil - Date.now())} left)`;
+    const ends = state.expiresAt === null ? '' : `Access ends ${formatDate(new Date(state.expiresAt).toISOString())}`;
+    const left = state.unlockedUntil === null ? '' : `Unlocked for ${formatCountdown(state.unlockedUntil - Date.now())}`;
+    $('shared-meta').textContent = [ends, left].filter(Boolean).join(' · ');
   }
 
   // Runs every second: refreshes the countdown, and when an unlock window or
@@ -745,7 +836,7 @@
   }
 
   function renderSharedFile(file, requestId) {
-    const item = el('li', 'record-item shared-item');
+    const item = el('li', 'shared-item');
     const row = el('div', 'shared-row');
     const meta = el('div', 'record-meta');
     const title = file.kind === 'personal_data' ? `Personal record #${file.id}` : file.name;
@@ -811,8 +902,6 @@
     }
     sharedOpen = entry.id;
     $('shared-title').textContent = `Files from ${entry.username}`;
-    $('shared-owner').textContent = 'Only the records they approved are listed.';
-    $('shared-expires').textContent = formatDate(entry.expires_at);
     $('shared-status').textContent = state.files.length ? '' : 'No files were shared in this request.';
     sharedFiles.replaceChildren(...state.files.map((file) => renderSharedFile(file, entry.id)));
     updateDeadlines();

@@ -10,96 +10,109 @@
 <div class="vault-frame" id="sharing" data-requests-url="{{ url_for('sharing.list_requests') }}" data-records-url="{{ url_for('storage.index') }}" data-login-url="{{ url_for('auth.login') }}">
   <header class="vault-header container">
     <a class="brand" href="{{ url_for('main.index') }}"><span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 32 32" fill="none"><path d="M4 17h6l3-7 5 13 3-6h7" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"/></svg></span><span>medvault<span class="accent">.</span></span></a>
-    <nav aria-label="Sharing"><a href="{{ url_for('main.index') }}">Your vault</a><a href="#outgoing-section">Request access</a><a href="#incoming-section">Incoming</a></nav>
+    <nav aria-label="Main"><a href="{{ url_for('main.index') }}">Your vault</a><a href="{{ url_for('main.sharing_page') }}" aria-current="page">Sharing</a></nav>
     <form method="post" action="{{ url_for('auth.logout') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="logout" type="submit">Log out <span aria-hidden="true">&#8599;</span></button></form>
   </header>
-  <div class="container vault-content">
-    <div class="welcome"><div><h1>Sharing<span class="accent">.</span></h1><p>Ask for access to someone else's records, or decide who can see yours.</p><p class="signed-in">Logged in as {{ current_user.username }}.</p></div><button class="subtle-button" type="button" id="refresh-requests">Refresh requests</button></div>
-    <p id="sharing-message" class="notice" role="status" aria-live="polite" hidden></p>
-    <div class="sharing-grid">
-      <section class="panel" id="outgoing-section" aria-labelledby="request-heading">
-        <span class="tag">YOU ASK</span>
-        <h2 id="request-heading">Request access<span class="accent">.</span></h2>
-        <p>Enter the username of the person whose records you need to see, and explain why.</p>
-        <form id="request-form" novalidate>
-          <label for="request-username">Owner's username</label>
-          <input id="request-username" name="username" autocomplete="off" autocapitalize="none" spellcheck="false" maxlength="64" required aria-describedby="request-username-hint">
-          <p class="field-hint" id="request-username-hint">3 to 32 characters: letters, digits, dot, underscore or hyphen.</p>
-          <label for="request-reason">Reason</label>
-          <textarea id="request-reason" name="reason" maxlength="500" required aria-describedby="request-reason-hint"></textarea>
-          <p class="field-hint" id="request-reason-hint"><span id="request-reason-count">0</span> / 500 characters</p>
-          <button class="primary button full" type="submit" id="request-submit">Send request <span aria-hidden="true">&#8599;</span></button>
-          <p id="request-status" class="field-hint form-status" role="status" aria-live="polite"></p>
-        </form>
-        <h3 class="list-heading">Your requests <small>access you asked for</small></h3>
-        <p id="outgoing-status" class="field-hint list-summary" role="status" aria-live="polite">Loading requests...</p>
-        <ul id="outgoing-list" class="record-list request-list" aria-label="Your outgoing requests"></ul>
-        <details class="past-requests" id="outgoing-past" hidden><summary id="outgoing-past-summary">Past requests</summary><ul id="outgoing-past-list" class="record-list request-list" aria-label="Past outgoing requests"></ul></details>
-      </section>
-      <section class="panel" id="incoming-section" aria-labelledby="incoming-heading">
-        <span class="tag">ASKED OF YOU</span>
-        <h2 id="incoming-heading">Incoming requests<span class="accent">.</span></h2>
-        <p>People who asked to see your records. You choose exactly which records they get.</p>
-        <p id="incoming-status" class="field-hint list-summary" role="status" aria-live="polite">Loading requests...</p>
-        <ul id="incoming-list" class="record-list request-list" aria-label="Incoming requests"></ul>
-        <details class="past-requests" id="incoming-past" hidden><summary id="incoming-past-summary">Past requests</summary><ul id="incoming-past-list" class="record-list request-list" aria-label="Past incoming requests"></ul></details>
-      </section>
+
+  <div class="container vault-content sharing-content">
+    <div class="sharing-head">
+      <h1>Sharing<span class="accent">.</span></h1>
+      <div class="sharing-head-actions">
+        <button class="subtle-button" type="button" id="refresh-requests">Refresh</button>
+        <button class="primary button small" type="button" id="request-open">Request access</button>
+      </div>
     </div>
+    <p id="sharing-message" class="notice" role="status" aria-live="polite" hidden></p>
+
+    <div class="tabs" role="tablist" aria-label="Sharing requests">
+      <button class="tab" role="tab" type="button" id="tab-incoming" aria-selected="true" aria-controls="pane-incoming">
+        <span class="tab-title">Review requests <span class="count" id="incoming-count" hidden></span></span>
+        <span class="tab-sub">People who want to see your records</span>
+      </button>
+      <button class="tab" role="tab" type="button" id="tab-outgoing" aria-selected="false" aria-controls="pane-outgoing" tabindex="-1">
+        <span class="tab-title">My requests <span class="count" id="outgoing-count" hidden></span></span>
+        <span class="tab-sub">Records you asked to see</span>
+      </button>
+    </div>
+
+    <section class="inbox" id="pane-incoming" role="tabpanel" aria-labelledby="tab-incoming">
+      <p id="incoming-status" class="empty-state" role="status" aria-live="polite">Loading requests...</p>
+      <ul id="incoming-list" class="request-list" aria-label="Requests to review"></ul>
+      <details class="past-requests" id="incoming-past" hidden><summary id="incoming-past-summary">Past requests</summary><ul id="incoming-past-list" class="request-list" aria-label="Past requests to review"></ul></details>
+    </section>
+    <section class="inbox" id="pane-outgoing" role="tabpanel" aria-labelledby="tab-outgoing" hidden>
+      <p id="outgoing-status" class="empty-state" role="status" aria-live="polite">Loading requests...</p>
+      <ul id="outgoing-list" class="request-list" aria-label="My requests"></ul>
+      <details class="past-requests" id="outgoing-past" hidden><summary id="outgoing-past-summary">Past requests</summary><ul id="outgoing-past-list" class="request-list" aria-label="My past requests"></ul></details>
+    </section>
   </div>
   <footer class="container vault-footer">PERSONAL RECORDS, THOUGHTFULLY ORGANIZED.</footer>
 
+  <dialog id="request-dialog" aria-labelledby="request-title">
+    <form id="request-form" novalidate>
+      <h2 id="request-title">Request access</h2>
+      <label for="request-username">Username of the person who has the records</label>
+      <input id="request-username" name="username" autocomplete="off" autocapitalize="none" spellcheck="false" maxlength="64" required>
+      <label for="request-reason">Why do you need to see them?</label>
+      <textarea id="request-reason" name="reason" rows="4" maxlength="500" required aria-describedby="request-reason-hint"></textarea>
+      <p class="field-hint" id="request-reason-hint"><span id="request-reason-count">0</span> / 500</p>
+      <p id="request-status" class="dialog-error" role="alert"></p>
+      <div class="dialog-actions"><button class="subtle-button" type="button" id="request-cancel">Cancel</button><button class="primary button" type="submit" id="request-submit">Send request</button></div>
+    </form>
+  </dialog>
+
   <dialog id="shared-dialog" class="wide files-dialog" aria-labelledby="shared-title">
     <div class="dialog-head">
-      <div><span class="tag">SHARED WITH YOU</span><h2 id="shared-title">Shared files</h2><p id="shared-owner"></p></div>
+      <div><h2 id="shared-title">Shared files</h2><p id="shared-meta" class="dialog-meta"></p></div>
       <button class="subtle-button" type="button" id="shared-close">Close</button>
     </div>
-    <dl class="deadlines"><div><dt>Share expires</dt><dd id="shared-expires"></dd></div><div><dt>Unlock ends</dt><dd id="shared-unlock"></dd></div></dl>
     <p id="shared-status" class="field-hint" role="status" aria-live="polite"></p>
-    <ul id="shared-files" class="record-list shared-files"></ul>
+    <ul id="shared-files" class="shared-files"></ul>
   </dialog>
 
   <dialog id="approve-dialog" class="wide" aria-labelledby="approve-title">
     <form id="approve-form" novalidate>
-      <h2 id="approve-title">Approve request</h2>
-      <p id="approve-intro"></p>
+      <h2 id="approve-title">Share your records</h2>
+      <p id="approve-intro" class="dialog-meta"></p>
       <p id="approve-status" class="field-hint" role="status" aria-live="polite">Loading your records...</p>
-      <fieldset class="picker" id="approve-picker" hidden><legend>Records to share</legend><ul id="approve-list" class="check-list"></ul></fieldset>
+      <div class="picker" id="approve-picker" hidden>
+        <p class="picker-label" id="approve-picker-label">Choose what they can see</p>
+        <ul id="approve-list" class="check-list" aria-labelledby="approve-picker-label"></ul>
+      </div>
       <p id="approve-error" class="dialog-error" role="alert"></p>
-      <div class="dialog-actions"><button class="subtle-button" type="button" id="approve-cancel">Cancel</button><button class="primary button" type="submit" id="approve-submit" disabled>Approve and create key package</button></div>
+      <div class="dialog-actions"><button class="subtle-button" type="button" id="approve-cancel">Cancel</button><button class="primary button" type="submit" id="approve-submit" disabled>Approve and get key package</button></div>
     </form>
   </dialog>
 
   <dialog id="package-dialog" class="wide" aria-labelledby="package-title">
     <h2 id="package-title">Key package</h2>
-    <p id="package-intro">Send this text to the requester through WhatsApp or email. It is encrypted and can only be opened by the requester with their password.</p>
-    <label for="package-text">Key package</label>
+    <p id="package-intro" class="dialog-meta"></p>
+    <label for="package-text" class="visually-hidden">Key package</label>
     <textarea id="package-text" class="package-text" readonly rows="6" spellcheck="false"></textarea>
     <p id="package-status" class="field-hint" role="status" aria-live="polite"></p>
-    <div class="dialog-actions"><button class="subtle-button" type="button" id="package-download">Download .txt</button><button class="primary button" type="button" id="package-copy">Copy package</button><button class="subtle-button" type="button" id="package-close">Close</button></div>
+    <div class="dialog-actions"><button class="subtle-button" type="button" id="package-download">Download .txt</button><button class="subtle-button" type="button" id="package-close">Done</button><button class="primary button" type="button" id="package-copy">Copy key package</button></div>
   </dialog>
 
   <dialog id="unlock-dialog" class="wide" aria-labelledby="unlock-title">
     <form id="unlock-form" novalidate>
-      <h2 id="unlock-title">Unlock shared files</h2>
-      <p id="unlock-intro"></p>
+      <h2 id="unlock-title">Unlock files</h2>
+      <p id="unlock-intro" class="dialog-meta"></p>
       <label for="unlock-package">Key package</label>
-      <textarea id="unlock-package" rows="5" spellcheck="false" autocomplete="off" required></textarea>
-      <label class="file-link" for="unlock-file">or choose a .txt file containing the package</label>
+      <textarea id="unlock-package" rows="5" spellcheck="false" autocomplete="off" required placeholder="Paste the key package here"></textarea>
+      <label class="file-link" for="unlock-file">Or choose a .txt file</label>
       <input id="unlock-file" class="file-input" type="file" accept=".txt,text/plain">
-      <label for="unlock-password">Your account password</label>
-      <input id="unlock-password" type="password" autocomplete="current-password" maxlength="1024" required aria-describedby="unlock-password-hint">
-      <p class="field-hint" id="unlock-password-hint">Use the password you log in to MedVault with. It is sent once to open the package and is never stored.</p>
+      <label for="unlock-password">Your MedVault password</label>
+      <input id="unlock-password" type="password" autocomplete="current-password" maxlength="1024" required>
       <p id="unlock-error" class="dialog-error" role="alert"></p>
-      <div class="dialog-actions"><button class="subtle-button" type="button" id="unlock-cancel">Cancel</button><button class="primary button" type="submit" id="unlock-submit">Unlock</button></div>
+      <div class="dialog-actions"><button class="subtle-button" type="button" id="unlock-cancel">Cancel</button><button class="primary button" type="submit" id="unlock-submit">Unlock files</button></div>
     </form>
   </dialog>
 
   <dialog id="revoke-dialog" aria-labelledby="revoke-title">
-    <h2 id="revoke-title">Revoke access?</h2>
+    <h2 id="revoke-title">Remove access?</h2>
     <p id="revoke-description"></p>
-    <p>The shared copies are deleted and the key package stops working. Files already downloaded cannot be taken back.</p>
     <p id="revoke-error" class="dialog-error" role="alert"></p>
-    <div class="dialog-actions"><button class="subtle-button" type="button" id="revoke-cancel">Cancel</button><button class="danger-button" type="button" id="revoke-confirm">Revoke access</button></div>
+    <div class="dialog-actions"><button class="subtle-button" type="button" id="revoke-cancel">Keep access</button><button class="danger-button" type="button" id="revoke-confirm">Remove access</button></div>
   </dialog>
 </div>
 {% endblock %}
